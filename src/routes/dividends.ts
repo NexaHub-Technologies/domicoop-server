@@ -1,10 +1,12 @@
 import Elysia, { t } from "elysia";
+import { authenticate } from "../middleware/authenticate";
 import { requireAdmin } from "../middleware/requireAdmin";
 import { supabase } from "../lib/supabase";
 import { paystack } from "../lib/paystack";
 import { writeAuditLog } from "../utils/audit";
 
 export const dividendRoutes = new Elysia({ prefix: "/dividends" })
+  .use(authenticate)
   .use(requireAdmin)
 
   // GET /dividends — list all dividends

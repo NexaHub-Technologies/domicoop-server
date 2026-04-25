@@ -85,9 +85,7 @@ export class NotificationService {
     const accessToken = process.env.EXPO_ACCESS_TOKEN;
 
     if (!accessToken) {
-      console.warn(
-        "EXPO_ACCESS_TOKEN not set. Push notifications will not work."
-      );
+      console.warn("EXPO_ACCESS_TOKEN not set. Push notifications will not work.");
     }
 
     this.expo = new Expo({ accessToken });
@@ -125,7 +123,7 @@ export class NotificationService {
    */
   async sendPushNotifications(
     userIds: string[],
-    payload: NotificationPayload
+    payload: NotificationPayload,
   ): Promise<void> {
     if (!userIds.length) return;
 
@@ -209,7 +207,7 @@ export class NotificationService {
           type: "notification",
           timestamp: new Date().toISOString(),
           ...payload,
-        })
+        }),
       );
 
       console.log("Broadcasted to admin dashboard:", payload.title);
@@ -226,11 +224,7 @@ export class NotificationService {
    * @param {NotificationPayload} payload - Notification content
    * @returns {void}
    */
-  sendToUser(
-    server: Elysia,
-    userId: string,
-    payload: NotificationPayload
-  ): void {
+  sendToUser(server: Elysia, userId: string, payload: NotificationPayload): void {
     try {
       // @ts-ignore
       server?.server?.publish(
@@ -239,7 +233,7 @@ export class NotificationService {
           type: "notification",
           timestamp: new Date().toISOString(),
           ...payload,
-        })
+        }),
       );
     } catch (error) {
       console.error(`Error sending to user ${userId}:`, error);
@@ -290,7 +284,7 @@ export class NotificationService {
    */
   async isEnabled(
     userId: string,
-    type: "payments" | "loans" | "announcements" | "messages"
+    type: "payments" | "loans" | "announcements" | "messages",
   ): Promise<boolean> {
     const prefs = await this.getPreferences(userId);
     return prefs[`${type}_enabled` as keyof NotificationPreferences] as boolean;
@@ -338,7 +332,7 @@ export class NotificationService {
    */
   private chunk<T>(array: T[], size: number): T[][] {
     return Array.from({ length: Math.ceil(array.length / size) }, (_, i) =>
-      array.slice(i * size, i * size + size)
+      array.slice(i * size, i * size + size),
     );
   }
 
@@ -355,7 +349,7 @@ export class NotificationService {
     profiles: any[],
     tickets: ExpoPushTicket[],
     payload: NotificationPayload,
-    channel: string
+    channel: string,
   ): Promise<void> {
     const logs = tickets.map((ticket, i) => ({
       recipient_id: profiles[i]?.id,
@@ -365,13 +359,10 @@ export class NotificationService {
       body: payload.body,
       data: (payload.data || {}) as Json,
       status: ticket.status === "ok" ? "sent" : "failed",
-      error_message:
-        ticket.status === "error" ? ticket.message : null,
+      error_message: ticket.status === "error" ? ticket.message : null,
     }));
 
-    const { error } = await supabase
-      .from("notification_logs")
-      .insert(logs);
+    const { error } = await supabase.from("notification_logs").insert(logs);
 
     if (error) {
       console.error("Error logging notifications:", error);

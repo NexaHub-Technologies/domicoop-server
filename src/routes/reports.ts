@@ -1,8 +1,10 @@
 import Elysia, { t }    from 'elysia'
+import { authenticate } from '../middleware/authenticate'
 import { requireAdmin } from '../middleware/requireAdmin'
 import { supabase }     from '../lib/supabase'
 
 export const reportRoutes = new Elysia({ prefix: '/reports' })
+  .use(authenticate)
   .use(requireAdmin)
 
   // GET /reports/summary?year=2026 — financial summary
@@ -89,63 +91,5 @@ export const reportRoutes = new Elysia({ prefix: '/reports' })
       }
     },
     { query: t.Partial(t.Object({ year: t.Numeric() })) }
-  )
+  );
 
-  // GET /reports/member-statement/:id?year=2026 — individual member statement
-  .get('/member-statement/:id',
-    async ({ params, query }) => {
-      const year = query.year ?? new Date().getFullYear()
-
-      const [profile, contributions, loans, transactions] = await Promise.all([
-        supabase.from('profiles')
-          .select('id, full_name, member_no, phone, address, status, created_at')
-          .eq('id', params.id).single(),
-
-        supabase.from('contributions')
-          .select('*')
-          .eq('member_id', params.id)
-          .eq('year', year)
-          .order('month', { ascending: true }),
-
-        supabase.from('loans')
-          .select('*')
-          .eq('member_id', params.id)
-          .order('created_at', { ascending: false }),
-
-        supabase.from('transactions')
-          .select('*')
-          .eq('member_id', params.id)
-          .order('created_at', { ascending: false }),
-      ])
-
-      if (!profile.data) throw new Error('Member not found')
-
-      const totalContributions = contributions.data
-        ?.filter(c => c.payment_status === 'success')
-        .reduce((s, c) => s + Number(c.amount), 0) ?? 0
-
-      const activeLoans = loans.data?.filter(l => 
-        ['disbursed', 'repaying'].includes(l.status)
-      ) ?? []
-
-      return {
-        year,
-        member: profile.data,
-        contributions: {
-          total: totalContributions,
-          items: contributions.data,
-        },
-        loans: {
-          total: loans.data?.length ?? 0,
-          active: activeLoans.length,
-          outstanding_balance: activeLoans.reduce((s, l) => s + Number(l.balance), 0),
-          items: loans.data,
-        },
-        transactions: {
-          total: transactions.data?.length ?? 0,
-          items: transactions.data,
-        },
-      }
-    },
-    { query: t.Partial(t.Object({ year: t.Numeric() })) }
-  )

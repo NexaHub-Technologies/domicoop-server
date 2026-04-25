@@ -19,6 +19,7 @@ export const announcementRoutes = new Elysia({ prefix: "/announcements" })
   })
 
   // Admin routes
+  .use(authenticate)
   .use(requireAdmin)
 
   // GET /announcements/all — admin view all

@@ -60,25 +60,6 @@ export const notificationRoutes = new Elysia({ prefix: "/notifications" })
     { body: t.Partial(t.Object({ id: t.String() })) }
   )
 
-  // Store Expo Push Token
-  .post(
-    "/expo-token",
-    async ({ userId, body }) => {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ expo_push_token: body.expo_push_token })
-        .eq("id", userId);
-
-      if (error) throw new Error("Failed to save push token");
-      return { success: true };
-    },
-    {
-      body: t.Object({
-        expo_push_token: t.String(),
-      }),
-    }
-  )
-
   // Get notification preferences
   .get("/preferences", async ({ userId }) => {
     const prefs = await notificationService.getPreferences(userId);

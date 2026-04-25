@@ -138,13 +138,17 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
   )
 
   // transactions/contribution-details-info.tsx → GET /contributions/:id
-  .get("/:id", async ({ params, userId }) => {
-    const { data, error } = await supabase
+  .get("/:id", async ({ params, userId, role }) => {
+    let q = supabase
       .from("contributions")
       .select("id, amount, year, month, transaction_ref, member_no, member_email, payment_method, payment_status, notes, created_at, updated_at, transactions(paystack_ref, channel, created_at)")
-      .eq("id", params.id)
-      .eq("member_id", userId)
-      .single();
+      .eq("id", params.id);
+
+    if (role !== "admin") {
+      q = q.eq("member_id", userId);
+    }
+
+    const { data, error } = await q.single();
     if (error) throw new Error("Contribution not found");
     return data;
   })
