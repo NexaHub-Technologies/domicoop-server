@@ -187,12 +187,15 @@ export type Database = {
           balance: number | null
           created_at: string
           disbursed_at: string | null
+          disbursement_pending_otp: boolean | null
           due_date: string | null
           id: string
           interest_rate: number | null
           member_id: string
           monthly_repayment: number | null
+          paystack_transfer_ref: string | null
           purpose: string
+          recipient_code: string | null
           status: string
           tenure_months: number | null
           type: string
@@ -205,12 +208,15 @@ export type Database = {
           balance?: number | null
           created_at?: string
           disbursed_at?: string | null
+          disbursement_pending_otp?: boolean | null
           due_date?: string | null
           id?: string
           interest_rate?: number | null
           member_id: string
           monthly_repayment?: number | null
+          paystack_transfer_ref?: string | null
           purpose: string
+          recipient_code?: string | null
           status?: string
           tenure_months?: number | null
           type: string
@@ -223,12 +229,15 @@ export type Database = {
           balance?: number | null
           created_at?: string
           disbursed_at?: string | null
+          disbursement_pending_otp?: boolean | null
           due_date?: string | null
           id?: string
           interest_rate?: number | null
           member_id?: string
           monthly_repayment?: number | null
+          paystack_transfer_ref?: string | null
           purpose?: string
+          recipient_code?: string | null
           status?: string
           tenure_months?: number | null
           type?: string

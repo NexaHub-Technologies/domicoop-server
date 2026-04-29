@@ -11,7 +11,7 @@ export interface WebhookContext {
   webhookPayload: {
     event: string
     data: Record<string, unknown>
-  }
+  } | null
 }
 
 export interface PaginatedResponse<T> {

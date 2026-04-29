@@ -10,6 +10,8 @@ import { notificationRoutes } from "./notifications";
 import { websocketRoutes } from "./websocket";
 import { announcementRoutes } from "./announcements";
 import { reportRoutes } from "./reports";
+import { bankRoutes } from "./banks";
+import { webhookRoutes } from "./webhooks";
 
 export const v1Routes = new Elysia({ prefix: "/v1" })
   .use(authRoutes)
@@ -22,4 +24,6 @@ export const v1Routes = new Elysia({ prefix: "/v1" })
   .use(notificationRoutes)
   .use(websocketRoutes)
   .use(announcementRoutes)
-  .use(reportRoutes);
+  .use(reportRoutes)
+  .use(bankRoutes)
+  .use(webhookRoutes);

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
 import { paginationQS, paginate } from "@/utils/validators";
 import type { Database } from "@/types/database";
+import { disburseLoan, notifyLoanApproved } from "@/services/loanDisbursement";
 
 type LoanUpdate = Database["public"]["Tables"]["loans"]["Update"];
 
@@ -242,6 +243,11 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         entity: "loans",
         entity_id: params.id,
       });
+
+      if (body.status === "approved") {
+        await notifyLoanApproved(params.id);
+      }
+
       return data;
     },
     {
@@ -258,4 +264,62 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         admin_notes: t.Optional(t.String()),
       }),
     },
-  );
+  )
+
+  .post("/:id/disburse", async ({ params, userId }) => {
+    const { data: loan, error: loanError } = await supabase
+      .from("loans")
+      .select("id, status, amount_approved")
+      .eq("id", params.id)
+      .single();
+
+    if (loanError || !loan) {
+      throw new Error("Loan not found");
+    }
+
+    if (loan.status !== "approved") {
+      throw new Error(
+        `Loan must be in 'approved' status to disburse. Current status: ${loan.status}`,
+      );
+    }
+
+    if (!loan.amount_approved || loan.amount_approved <= 0) {
+      throw new Error("Loan has no approved amount to disburse");
+    }
+
+    const result = await disburseLoan(params.id);
+
+    await writeAuditLog({
+      actor_id: userId,
+      action: `loan_disbursement_${result.result}`,
+      entity: "loans",
+      entity_id: params.id,
+      metadata: {
+        paystack_transfer_ref: result.paystack_transfer_ref,
+        recipient_code: result.recipient_code,
+      },
+    });
+
+    if (result.result === "success") {
+      return {
+        success: true,
+        status: "disbursed",
+        paystack_transfer_ref: result.paystack_transfer_ref,
+        disbursed_at: result.disbursed_at,
+        message: "Loan disbursed successfully",
+      };
+    } else if (result.result === "pending_otp") {
+      return {
+        success: true,
+        status: "pending_otp",
+        paystack_transfer_ref: result.paystack_transfer_ref,
+        message: result.message || "Transfer initiated. Awaiting OTP confirmation.",
+      };
+    } else {
+      return {
+        success: false,
+        status: "disbursement_failed",
+        message: result.message || "Disbursement failed",
+      };
+    }
+  });
