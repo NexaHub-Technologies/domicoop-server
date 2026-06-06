@@ -14,7 +14,7 @@ export const messageRoutes = new Elysia({ prefix: "/messages" })
     const { data, error } = await supabase
       .from("messages")
       .select("*, message_replies(id, body, sender_id, created_at)")
-      .eq("member_id", userId)
+      .eq("member_id", userId!)
       .order("updated_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data;
@@ -26,13 +26,13 @@ export const messageRoutes = new Elysia({ prefix: "/messages" })
     async ({ userId, body }) => {
       const { data, error } = await supabase
         .from("messages")
-        .insert({ member_id: userId, subject: body.subject, status: "open" })
+        .insert({ member_id: userId!, subject: body.subject, status: "open" })
         .select()
         .single();
       if (error) throw new Error(error.message);
       await supabase
         .from("message_replies")
-        .insert({ message_id: data.id, sender_id: userId, body: body.body });
+        .insert({ message_id: data.id, sender_id: userId!, body: body.body });
       return data;
     },
     {
@@ -57,7 +57,7 @@ export const messageRoutes = new Elysia({ prefix: "/messages" })
       }
       const { data, error } = await supabase
         .from("message_replies")
-        .insert({ message_id: params.id, sender_id: userId, body: body.body })
+        .insert({ message_id: params.id, sender_id: userId!, body: body.body })
         .select()
         .single();
       if (error) throw new Error(error.message);
@@ -78,14 +78,11 @@ export const messageRoutes = new Elysia({ prefix: "/messages" })
         .single();
       if (thread && role === "admin") {
         // Send push notification via Expo
-        await notificationService.sendPushNotifications(
-          [thread.member_id],
-          {
-            title: "New reply from admin",
-            body: body.body.slice(0, 80),
-            data: { type: "message", message_id: params.id },
-          }
-        );
+        await notificationService.sendPushNotifications([thread.member_id], {
+          title: "New reply from admin",
+          body: body.body.slice(0, 80),
+          data: { type: "message", message_id: params.id },
+        });
 
         // Also persist notification to inbox
         await supabase.from("notifications").insert({

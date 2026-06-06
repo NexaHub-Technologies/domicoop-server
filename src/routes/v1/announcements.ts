@@ -41,14 +41,14 @@ export const announcementRoutes = new Elysia({ prefix: "/announcements" })
         .insert({
           title: body.title,
           body: body.body,
-          author_id: userId,
+          author_id: userId!,
           published: body.published ?? false,
         })
         .select()
         .single();
       if (error) throw new Error(error.message);
       await writeAuditLog({
-        actor_id: userId,
+        actor_id: userId!,
         action: "create_announcement",
         entity: "announcements",
         entity_id: data.id,
@@ -79,7 +79,7 @@ export const announcementRoutes = new Elysia({ prefix: "/announcements" })
         .single();
       if (error) throw new Error(error.message);
       await writeAuditLog({
-        actor_id: userId,
+        actor_id: userId!,
         action: "update_announcement",
         entity: "announcements",
         entity_id: params.id,
@@ -102,7 +102,7 @@ export const announcementRoutes = new Elysia({ prefix: "/announcements" })
     const { error } = await supabase.from("announcements").delete().eq("id", params.id);
     if (error) throw new Error(error.message);
     await writeAuditLog({
-      actor_id: userId,
+      actor_id: userId!,
       action: "delete_announcement",
       entity: "announcements",
       entity_id: params.id,

@@ -89,6 +89,7 @@ export type Database = {
         Row: {
           amount: number
           created_at: string
+          deposit: number | null
           id: string
           member_email: string | null
           member_id: string
@@ -97,6 +98,9 @@ export type Database = {
           notes: string | null
           payment_method: string | null
           payment_status: string | null
+          savings: number | null
+          shares: number | null
+          social: number | null
           transaction_ref: string | null
           updated_at: string
           year: number
@@ -104,6 +108,7 @@ export type Database = {
         Insert: {
           amount: number
           created_at?: string
+          deposit?: number | null
           id?: string
           member_email?: string | null
           member_id: string
@@ -112,6 +117,9 @@ export type Database = {
           notes?: string | null
           payment_method?: string | null
           payment_status?: string | null
+          savings?: number | null
+          shares?: number | null
+          social?: number | null
           transaction_ref?: string | null
           updated_at?: string
           year: number
@@ -119,6 +127,7 @@ export type Database = {
         Update: {
           amount?: number
           created_at?: string
+          deposit?: number | null
           id?: string
           member_email?: string | null
           member_id?: string
@@ -127,6 +136,9 @@ export type Database = {
           notes?: string | null
           payment_method?: string | null
           payment_status?: string | null
+          savings?: number | null
+          shares?: number | null
+          social?: number | null
           transaction_ref?: string | null
           updated_at?: string
           year?: number

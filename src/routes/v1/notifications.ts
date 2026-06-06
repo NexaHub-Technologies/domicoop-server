@@ -27,7 +27,7 @@ export const notificationRoutes = new Elysia({ prefix: "/notifications" })
       let q = supabase
         .from("notifications")
         .select("*")
-        .eq("member_id", userId)
+        .eq("member_id", userId!)
         .order("created_at", { ascending: false })
         .limit(50);
 
@@ -49,7 +49,7 @@ export const notificationRoutes = new Elysia({ prefix: "/notifications" })
       let q = supabase
         .from("notifications")
         .update({ read: true })
-        .eq("member_id", userId);
+        .eq("member_id", userId!);
 
       if (body.id) q = q.eq("id", body.id);
       // If no id provided, mark all as read
@@ -62,7 +62,7 @@ export const notificationRoutes = new Elysia({ prefix: "/notifications" })
 
   // Get notification preferences
   .get("/preferences", async ({ userId }) => {
-    const prefs = await notificationService.getPreferences(userId);
+    const prefs = await notificationService.getPreferences(userId!);
     return prefs;
   })
 

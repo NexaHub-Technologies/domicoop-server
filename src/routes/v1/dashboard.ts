@@ -16,20 +16,20 @@ export const dashboardRoutes = new Elysia({ prefix: "/dashboard" })
         supabase
           .from("profiles")
           .select("full_name, member_no, status, avatar_url")
-          .eq("id", userId)
+          .eq("id", userId!)
           .single(),
 
         supabase
           .from("contributions")
-          .select("amount, payment_status, month")
-          .eq("member_id", userId)
+          .select("amount, shares, social, savings, deposit, month")
+          .eq("member_id", userId!)
           .eq("year", currentYear)
           .eq("payment_status", "success"),
 
         supabase
           .from("loans")
           .select("id, amount_approved, balance, monthly_repayment, status, due_date")
-          .eq("member_id", userId)
+          .eq("member_id", userId!)
           .in("status", ["disbursed", "repaying"])
           .order("created_at", { ascending: false })
           .limit(1)
@@ -38,7 +38,7 @@ export const dashboardRoutes = new Elysia({ prefix: "/dashboard" })
         supabase
           .from("transactions")
           .select("id, amount, type, status, created_at, description")
-          .eq("member_id", userId)
+          .eq("member_id", userId!)
           .eq("status", "success")
           .order("created_at", { ascending: false })
           .limit(5),
@@ -51,14 +51,26 @@ export const dashboardRoutes = new Elysia({ prefix: "/dashboard" })
           .limit(3),
       ]);
 
-    const totalSavings =
+    const totalContributions =
       contributions.data?.reduce((s, c) => s + Number(c.amount), 0) ?? 0;
+    const totalSavings =
+      contributions.data?.reduce((s, c) => s + Number(c.savings ?? 0), 0) ?? 0;
+    const totalShares =
+      contributions.data?.reduce((s, c) => s + Number(c.shares ?? 0), 0) ?? 0;
+    const totalSocial =
+      contributions.data?.reduce((s, c) => s + Number(c.social ?? 0), 0) ?? 0;
+    const totalDeposit =
+      contributions.data?.reduce((s, c) => s + Number(c.deposit ?? 0), 0) ?? 0;
     const paidThisMonth =
       contributions.data?.some((c) => c.month === currentMonth) ?? false;
 
     return {
       member: profile.data,
+      total_contributions: totalContributions,
       total_savings: totalSavings,
+      total_shares: totalShares,
+      total_social: totalSocial,
+      total_deposit: totalDeposit,
       paid_this_month: paidThisMonth,
       current_month: currentMonth,
       active_loan: activeLoan.data,

@@ -18,7 +18,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
     const { data, error } = await supabase
       .from("loans")
       .select("*")
-      .eq("member_id", userId)
+      .eq("member_id", userId!)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data;
@@ -33,7 +33,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
       const { count } = await supabase
         .from("contributions")
         .select("*", { count: "exact", head: true })
-        .eq("member_id", userId)
+        .eq("member_id", userId!)
         .eq("payment_status", "success");
 
       if ((count ?? 0) < 3)
@@ -42,7 +42,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
       const { data: existing } = await supabase
         .from("loans")
         .select("id")
-        .eq("member_id", userId)
+        .eq("member_id", userId!)
         .in("status", ["pending", "under_review", "approved", "disbursed", "repaying"])
         .maybeSingle();
 
@@ -51,7 +51,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
       const { data, error } = await supabase
         .from("loans")
         .insert({
-          member_id: userId,
+          member_id: userId!,
           amount_requested: body.amount,
           purpose: body.purpose,
           type: body.type,
@@ -85,7 +85,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
       .from("loans")
       .select("*, transactions(paystack_ref, amount, created_at, channel)")
       .eq("id", params.id)
-      .eq("member_id", userId)
+      .eq("member_id", userId!)
       .single();
     if (error) throw new Error("Loan not found");
     return data;
@@ -111,7 +111,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         .from("loans")
         .select("id, member_id, balance, status")
         .eq("id", params.id)
-        .eq("member_id", userId)
+        .eq("member_id", userId!)
         .single();
 
       if (loanError || !loan) {
@@ -136,7 +136,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
 
       const { error: txError } = await supabase.from("transactions").insert({
         paystack_ref: paystackData.reference,
-        member_id: userId,
+        member_id: userId!,
         amount: paystackData.amount,
         type: "loan_repayment",
         status: "success",
@@ -153,7 +153,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
       }
 
       await supabase.from("notifications").insert({
-        member_id: userId,
+        member_id: userId!,
         title: "Loan Repayment Successful",
         body: `₦${amount.toLocaleString()} has been processed successfully.`,
         type: "payment",
@@ -238,7 +238,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         .single();
       if (error) throw new Error(error.message);
       await writeAuditLog({
-        actor_id: userId,
+        actor_id: userId!,
         action: `loan_${body.status}`,
         entity: "loans",
         entity_id: params.id,
@@ -290,7 +290,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
     const result = await disburseLoan(params.id);
 
     await writeAuditLog({
-      actor_id: userId,
+      actor_id: userId!,
       action: `loan_disbursement_${result.result}`,
       entity: "loans",
       entity_id: params.id,

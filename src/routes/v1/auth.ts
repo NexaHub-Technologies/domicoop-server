@@ -466,7 +466,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     async ({ body, set, user }) => {
       // First verify current password
       const { error: verifyError } = await supabaseAuth.auth.signInWithPassword({
-        email: user.email!,
+        email: user!.email!,
         password: body.current_password,
       });
 
@@ -531,7 +531,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       await supabase
         .from("profiles")
         .update({ expo_push_token: body.expo_push_token })
-        .eq("id", userId);
+        .eq("id", userId!);
       return { success: true };
     },
     { body: t.Object({ expo_push_token: t.String() }) },

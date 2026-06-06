@@ -16,7 +16,7 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
       .select(
         "id, full_name, email, phone, address, bank_name, bank_account, bank_code, next_of_kin, role, status, member_no, avatar_url, created_at",
       )
-      .eq("id", userId)
+      .eq("id", userId!)
       .single();
     if (error) throw new Error("Profile not found");
     return data;
@@ -29,7 +29,7 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
       const { data, error } = await supabase
         .from("profiles")
         .update({ ...body, updated_at: new Date().toISOString() })
-        .eq("id", userId)
+        .eq("id", userId!)
         .select()
         .single();
       if (error) throw new Error(error.message);
@@ -54,7 +54,7 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
   // security.tsx → GET /members/me/security
   // Returns non-sensitive security metadata — 2FA status, last login, active sessions count
   .get("/me/security", async ({ userId }) => {
-    const { data: authUser } = await supabase.auth.admin.getUserById(userId);
+    const { data: authUser } = await supabase.auth.admin.getUserById(userId!);
     return {
       email: authUser.user?.email,
       email_confirmed: !!authUser.user?.email_confirmed_at,
@@ -139,7 +139,7 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
         .single();
       if (error) throw new Error(error.message);
       await writeAuditLog({
-        actor_id: userId,
+        actor_id: userId!,
         action: "update_member",
         entity: "profiles",
         entity_id: params.id,
@@ -189,7 +189,7 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
       .single();
     if (error) throw new Error(error.message);
     await writeAuditLog({
-      actor_id: userId,
+      actor_id: userId!,
       action: "approve_member",
       entity: "profiles",
       entity_id: params.id,

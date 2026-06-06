@@ -3,7 +3,8 @@ import { authenticate } from "@/middleware/authenticate";
 import { requireAdmin } from "@/middleware/requireAdmin";
 import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
-import { paginationQS, paginate } from "@/utils/validators";
+import { paginate } from "@/utils/validators";
+import { allocateContribution } from "@/services/contributionAllocation";
 
 export const contributionRoutes = new Elysia({ prefix: "/contributions" })
   .use(authenticate)
@@ -12,7 +13,8 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
   // Returns all contributions with balance summary (calculated from successful contributions only)
   .get(
     "/me",
-    async ({ userId, query }) => {
+    async ({ userId: _userId, query }) => {
+      const userId = _userId!;
       const year = query.year ?? new Date().getFullYear();
       const { from, to } = paginate(
         Number(query.page) || 1,
@@ -24,7 +26,7 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
           supabase
             .from("contributions")
             .select(
-              "id, amount, year, month, transaction_ref, member_no, member_email, payment_method, payment_status, notes, created_at, updated_at",
+              "id, amount, shares, social, savings, deposit, year, month, transaction_ref, member_no, member_email, payment_method, payment_status, notes, created_at, updated_at",
               { count: "exact" }
             )
             .eq("member_id", userId)
@@ -33,7 +35,7 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
 
           supabase
             .from("contributions")
-            .select("amount, month, year")
+            .select("amount, shares, social, savings, deposit, month, year")
             .eq("member_id", userId)
             .eq("payment_status", "success"),
 
@@ -51,33 +53,38 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         ],
       );
 
+      const successData = successfulContributions.data ?? [];
+
       // Calculate total savings balance from successful contributions only
-      const totalBalance =
-        successfulContributions.data?.reduce((s, c) => s + Number(c.amount), 0) ?? 0;
+      const totalBalance = successData.reduce((s, c) => s + Number(c.amount), 0);
+
+      // Calculate allocation totals
+      const totalShares = successData.reduce((s, c) => s + Number(c.shares ?? 0), 0);
+      const totalSocial = successData.reduce((s, c) => s + Number(c.social ?? 0), 0);
+      const totalSavings = successData.reduce((s, c) => s + Number(c.savings ?? 0), 0);
+      const totalDeposit = successData.reduce((s, c) => s + Number(c.deposit ?? 0), 0);
 
       // Calculate yearly balance
       const yearBalance =
-        successfulContributions.data
-          ?.filter((c) => c.year === year)
-          .reduce((s, c) => s + Number(c.amount), 0) ?? 0;
+        successData
+          .filter((c) => c.year === year)
+          .reduce((s, c) => s + Number(c.amount), 0);
 
       // Calculate monthly breakdown
       const monthlyBreakdown =
-        successfulContributions.data?.reduce<Record<string, number>>((acc, c) => {
+        successData.reduce<Record<string, number>>((acc, c) => {
           acc[c.month] = (acc[c.month] ?? 0) + Number(c.amount);
           return acc;
-        }, {}) ?? {};
-
-      // Filter successful contributions by year if provided
-      let filteredSuccessful = successfulContributions.data ?? [];
-      if (query.year) {
-        filteredSuccessful = filteredSuccessful.filter((c) => c.year === query.year);
-      }
+        }, {});
 
       return {
         contributions: allContributions.data ?? [],
         total_count: allContributions.count ?? 0,
         total_balance: totalBalance,
+        total_shares: totalShares,
+        total_social: totalSocial,
+        total_savings: totalSavings,
+        total_deposit: totalDeposit,
         year_balance: yearBalance,
         monthly_breakdown: monthlyBreakdown,
         transactions: transactions.data,
@@ -102,12 +109,21 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
   // Allow pending users to create contributions
   .post(
     "/",
-    async ({ userId, body }) => {
+    async ({ userId: _userId, body }) => {
+      const userId = _userId!;
+      const isSuccess = body.payment_status === "success";
+      const storedAmount = isSuccess ? body.amount * 100 : body.amount;
+      const allocation = isSuccess ? allocateContribution(body.amount) : null;
+
       const { data, error } = await supabase
         .from("contributions")
         .insert({
           member_id: userId,
-          amount: body.payment_status === "success" ? body.amount * 100 : body.amount,
+          amount: storedAmount,
+          shares: allocation?.shares ?? null,
+          social: allocation?.social ?? null,
+          savings: allocation?.savings ?? null,
+          deposit: allocation?.deposit ?? null,
           year: body.year,
           month: body.month,
           transaction_ref: body.transaction_ref ?? null,
@@ -138,10 +154,11 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
   )
 
   // transactions/contribution-details-info.tsx → GET /contributions/:id
-  .get("/:id", async ({ params, userId, role }) => {
+  .get("/:id", async ({ params, userId: _userId, role }) => {
+    const userId = _userId!;
     let q = supabase
       .from("contributions")
-      .select("id, amount, year, month, transaction_ref, member_no, member_email, payment_method, payment_status, notes, created_at, updated_at, transactions(paystack_ref, channel, created_at)")
+      .select("id, amount, shares, social, savings, deposit, year, month, transaction_ref, member_no, member_email, payment_method, payment_status, notes, created_at, updated_at, transactions(paystack_ref, channel, created_at)")
       .eq("id", params.id);
 
     if (role !== "admin") {
@@ -187,10 +204,32 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
 
   .patch(
     "/:id/status",
-    async ({ params, body, userId }) => {
+    async ({ params, body, userId: _userId }) => {
+      const userId = _userId!;
+      const isSuccess = body.status === "success";
+
+      const { data: current } = await supabase
+        .from("contributions")
+        .select("amount")
+        .eq("id", params.id)
+        .single();
+
+      if (!current) throw new Error("Contribution not found");
+
+      const allocation = isSuccess
+        ? allocateContribution(Number(current.amount) / 100)
+        : null;
+
       const { data, error } = await supabase
         .from("contributions")
-        .update({ payment_status: body.status, updated_at: new Date().toISOString() })
+        .update({
+          payment_status: body.status,
+          shares: allocation?.shares ?? null,
+          social: allocation?.social ?? null,
+          savings: allocation?.savings ?? null,
+          deposit: allocation?.deposit ?? null,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", params.id)
         .select()
         .single();

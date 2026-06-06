@@ -146,7 +146,7 @@ export const dividendRoutes = new Elysia({ prefix: "/dividends" })
       }
 
       await writeAuditLog({
-        actor_id: userId,
+        actor_id: userId!,
         action: "dividend_distribute",
         entity: "dividends",
         metadata: { year: body.year, count: body.dividends.length },
