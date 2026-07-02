@@ -5,6 +5,9 @@ import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
 import { paginate } from "@/utils/validators";
 import { allocateContribution } from "@/services/contributionAllocation";
+import { NotificationService } from "@/services/notificationService";
+
+const notificationService = NotificationService.getInstance();
 
 export const contributionRoutes = new Elysia({ prefix: "/contributions" })
   .use(authenticate)
@@ -136,6 +139,19 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         .select()
         .single();
       if (error) throw new Error(error.message);
+
+      if (isSuccess) {
+        await notificationService.notify({
+          userIds: [userId],
+          type: "contribution",
+          title: "Contribution Received",
+          body: `Your contribution of ₦${body.amount.toLocaleString()} for ${body.month} has been recorded.`,
+          data: { event: "contribution_recorded", contribution_id: data.id, amount: body.amount, month: body.month },
+          action: { label: "View Contributions", url: "/contributions" },
+          notifyAdmins: true,
+        });
+      }
+
       return data;
     },
     {
@@ -240,6 +256,22 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         entity: "contributions",
         entity_id: params.id,
       });
+
+      // Tell the member the outcome of the status review (skip pending)
+      if (body.status !== "pending") {
+        const amountNaira = Number(data.amount) / 100;
+        await notificationService.notify({
+          userIds: [data.member_id],
+          type: "contribution",
+          title: isSuccess ? "Contribution Confirmed" : "Contribution Issue",
+          body: isSuccess
+            ? `Your contribution of ₦${amountNaira.toLocaleString()} for ${data.month} has been confirmed.`
+            : `Your contribution for ${data.month} was marked as ${body.status}. Please contact support if this is unexpected.`,
+          data: { event: `contribution_${body.status}`, contribution_id: params.id, month: data.month },
+          action: { label: "View Contributions", url: "/contributions" },
+        });
+      }
+
       return data;
     },
     {

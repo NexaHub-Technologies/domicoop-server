@@ -2,6 +2,7 @@ import Elysia, { t } from "elysia";
 import { supabaseAuth, supabase } from "@/lib/supabase";
 import { authenticate } from "@/middleware/authenticate";
 import { authRateLimit } from "@/middleware/rateLimiter";
+import { NotificationService } from "@/services/notificationService";
 
 /**
  * Authentication Routes
@@ -192,6 +193,20 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       }
 
       // Profile will be auto-created by database trigger with all fields
+
+      // Surface the new pending application on the admin dashboard;
+      // never let a notification failure fail registration
+      NotificationService.getInstance()
+        .notify({
+          userIds: [],
+          type: "security",
+          title: "New member application",
+          body: `${body.full_name} has registered and is awaiting approval.`,
+          data: { event: "member_registered", member_id: data.user!.id },
+          notifyAdmins: true,
+          pushAdmins: true,
+        })
+        .catch((err) => console.error("Failed to notify admins of registration:", err));
 
       return {
         message:
@@ -680,6 +695,17 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         .from("profiles")
         .update({ expo_push_token: body.expo_push_token })
         .eq("id", userId!);
+      // Push delivery reads from notification_devices — mirror the token
+      // there so app builds still using this legacy endpoint keep working.
+      // New builds should use POST /notifications/devices instead.
+      await supabase.from("notification_devices").upsert(
+        {
+          member_id: userId!,
+          token: body.expo_push_token,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "token" },
+      );
       return { success: true };
     },
     { body: t.Object({ expo_push_token: t.String() }) },

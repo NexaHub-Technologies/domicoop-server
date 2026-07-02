@@ -3,6 +3,7 @@ import { cors } from "@elysiajs/cors";
 import { swagger } from "@elysiajs/swagger";
 import { logger } from "@bogeychan/elysia-logger";
 import { v1Routes } from "@/routes/v1";
+import { NotificationService } from "@/services/notificationService";
 
 const app = new Elysia()
   .use(
@@ -52,6 +53,12 @@ const app = new Elysia()
   })
 
   .listen(process.env.PORT ?? 3000);
+
+// WebSocket publishing uses Bun's in-process pub/sub — a shared broker
+// (e.g. Redis) would be needed before running multiple instances.
+if (app.server) {
+  NotificationService.getInstance().setServer(app.server);
+}
 
 console.log(`✓ DOMICOP API running on http://localhost:${app.server?.port}`);
 export type App = typeof app;

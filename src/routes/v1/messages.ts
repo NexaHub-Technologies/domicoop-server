@@ -33,6 +33,18 @@ export const messageRoutes = new Elysia({ prefix: "/messages" })
       await supabase
         .from("message_replies")
         .insert({ message_id: data.id, sender_id: userId!, body: body.body });
+
+      // Let admins know a new support ticket arrived (admin-only channels)
+      await notificationService.notify({
+        userIds: [],
+        type: "security",
+        title: "New support ticket",
+        body: body.subject,
+        data: { event: "message_created", message_id: data.id, member_id: userId },
+        notifyAdmins: true,
+        pushAdmins: true,
+      });
+
       return data;
     },
     {
@@ -70,27 +82,31 @@ export const messageRoutes = new Elysia({ prefix: "/messages" })
         })
         .eq("id", params.id);
 
-      // Notify the other party via Expo Push
+      // Notify the other party
       const { data: thread } = await supabase
         .from("messages")
         .select("member_id")
         .eq("id", params.id)
         .single();
       if (thread && role === "admin") {
-        // Send push notification via Expo
-        await notificationService.sendPushNotifications([thread.member_id], {
+        await notificationService.notify({
+          userIds: [thread.member_id],
+          type: "security",
           title: "New reply from admin",
           body: body.body.slice(0, 80),
-          data: { type: "message", message_id: params.id },
+          data: { event: "message_reply", message_id: params.id },
+          action: { label: "View Message", url: "/messages" },
         });
-
-        // Also persist notification to inbox
-        await supabase.from("notifications").insert({
-          member_id: thread.member_id,
-          title: "New reply from admin",
+      } else if (thread) {
+        // Member replied — surface it on the admin dashboard
+        await notificationService.notify({
+          userIds: [],
+          type: "security",
+          title: "New reply on support ticket",
           body: body.body.slice(0, 80),
-          type: "message",
-          data: { message_id: params.id },
+          data: { event: "message_reply", message_id: params.id, member_id: thread.member_id },
+          notifyAdmins: true,
+          pushAdmins: true,
         });
       }
       return data;

@@ -11,6 +11,9 @@ const PUBLIC_PATHS = [
   "/v1/auth/refresh",
   "/v1/auth/oauth/google",
   "/v1/webhooks/paystack",
+  // WebSocket route authenticates itself in beforeHandle (browser clients
+  // pass the token as ?token= since they cannot set headers)
+  "/v1/ws/notifications",
   "/banks",
   "/auth/login",
   "/auth/register",
@@ -20,6 +23,7 @@ const PUBLIC_PATHS = [
   "/auth/refresh",
   "/auth/oauth/google",
   "/webhooks/paystack",
+  "/ws/notifications",
 ];
 
 export const authenticate = new Elysia({ name: "authenticate" }).derive(

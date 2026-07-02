@@ -3,6 +3,26 @@ import { authenticate } from "@/middleware/authenticate";
 import { requireAdmin } from "@/middleware/requireAdmin";
 import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
+import { NotificationService } from "@/services/notificationService";
+
+const notificationService = NotificationService.getInstance();
+
+/** Broadcast a newly published announcement to all active members */
+async function notifyAnnouncementPublished(announcement: {
+  id: string;
+  title: string;
+  body: string;
+}): Promise<void> {
+  const userIds = await notificationService.getTargetUserIds({ role: "member" });
+  await notificationService.notify({
+    userIds,
+    type: "meeting",
+    title: announcement.title,
+    body: announcement.body.slice(0, 120),
+    data: { event: "announcement_published", announcement_id: announcement.id },
+    action: { label: "View Announcement", url: "/announcements" },
+  });
+}
 
 export const announcementRoutes = new Elysia({ prefix: "/announcements" })
 
@@ -53,6 +73,11 @@ export const announcementRoutes = new Elysia({ prefix: "/announcements" })
         entity: "announcements",
         entity_id: data.id,
       });
+
+      if (data.published) {
+        await notifyAnnouncementPublished(data);
+      }
+
       return data;
     },
     {
@@ -68,6 +93,13 @@ export const announcementRoutes = new Elysia({ prefix: "/announcements" })
   .patch(
     "/:id",
     async ({ params, body, userId }) => {
+      // Pre-read so we only broadcast on the unpublished → published transition
+      const { data: previous } = await supabase
+        .from("announcements")
+        .select("published")
+        .eq("id", params.id)
+        .single();
+
       const { data, error } = await supabase
         .from("announcements")
         .update({
@@ -84,6 +116,11 @@ export const announcementRoutes = new Elysia({ prefix: "/announcements" })
         entity: "announcements",
         entity_id: params.id,
       });
+
+      if (data.published && previous && !previous.published) {
+        await notifyAnnouncementPublished(data);
+      }
+
       return data;
     },
     {

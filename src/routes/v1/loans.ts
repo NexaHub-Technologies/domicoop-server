@@ -7,6 +7,7 @@ import { writeAuditLog } from "@/utils/audit";
 import { paginationQS, paginate } from "@/utils/validators";
 import type { Database } from "@/types/database";
 import { disburseLoan, notifyLoanApproved } from "@/services/loanDisbursement";
+import { NotificationService } from "@/services/notificationService";
 
 type LoanUpdate = Database["public"]["Tables"]["loans"]["Update"];
 
@@ -152,16 +153,19 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         throw new Error(`Failed to record transaction: ${txError.message}`);
       }
 
-      await supabase.from("notifications").insert({
-        member_id: userId!,
+      await NotificationService.getInstance().notify({
+        userIds: [userId!],
+        type: "loan",
         title: "Loan Repayment Successful",
         body: `₦${amount.toLocaleString()} has been processed successfully.`,
-        type: "payment",
         data: {
+          event: "loan_repayment",
           loan_id: params.id,
           reference: paystackData.reference,
           amount: amount,
         },
+        action: { label: "View Details", url: `/loans/${params.id}` },
+        notifyAdmins: true,
       });
 
       return {
@@ -246,6 +250,15 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
 
       if (body.status === "approved") {
         await notifyLoanApproved(params.id);
+      } else if (body.status === "rejected") {
+        await NotificationService.getInstance().notify({
+          userIds: [data.member_id],
+          type: "loan",
+          title: "Loan Application Update",
+          body: "Your loan application was not approved. Please contact support for details.",
+          data: { event: "loan_rejected", loan_id: params.id },
+          action: { label: "View Details", url: `/loans/${params.id}` },
+        });
       }
 
       return data;

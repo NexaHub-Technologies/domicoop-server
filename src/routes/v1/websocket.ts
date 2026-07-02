@@ -4,7 +4,9 @@
  * Provides WebSocket connections for:
  * - Admin dashboard real-time updates
  * - User-specific notifications
- * - Bidirectional communication (optional)
+ *
+ * Auth: pass the Supabase access token as `?token=` (browsers cannot set
+ * headers on WebSocket connections) or as an `Authorization: Bearer` header.
  *
  * @module routes/websocket
  * @requires Elysia
@@ -19,10 +21,8 @@ import type { User } from "@supabase/supabase-js";
  * WebSocket message types
  */
 type WebSocketMessage =
-  | { type: "auth"; token: string }
   | { type: "ping" }
   | { type: "pong" }
-  | { type: "notification"; payload: any }
   | { type: "ack"; id: string };
 
 /**
@@ -31,19 +31,28 @@ type WebSocketMessage =
  * @route /ws/notifications
  */
 export const websocketRoutes = new Elysia().ws("/ws/notifications", {
+  query: t.Object({ token: t.Optional(t.String()) }),
+
   /**
-   * Validate connection before upgrade
+   * Validate connection before upgrade.
    *
-   * Checks Authorization header for JWT token
+   * Accepts the token via `?token=` query param (browser clients) or the
+   * Authorization header. On success the user is attached to the context so
+   * `open()` can read it from `ws.data` — returning a value here would
+   * short-circuit the upgrade, so we mutate instead.
    */
-  async beforeHandle({ headers, set }) {
-    const authHeader = headers["authorization"];
-    if (!authHeader?.startsWith("Bearer ")) {
+  async beforeHandle(ctx) {
+    const { query, headers, set } = ctx;
+    const headerToken = headers["authorization"]?.startsWith("Bearer ")
+      ? headers["authorization"].replace("Bearer ", "").trim()
+      : undefined;
+    const token = query.token || headerToken;
+
+    if (!token) {
       set.status = 401;
-      return "Missing or invalid authorization header";
+      return "Missing token (use ?token= or Authorization header)";
     }
 
-    const token = authHeader.replace("Bearer ", "").trim();
     const { data, error } = await supabaseAuth.auth.getUser(token);
 
     if (error || !data.user) {
@@ -51,8 +60,8 @@ export const websocketRoutes = new Elysia().ws("/ws/notifications", {
       return "Invalid or expired token";
     }
 
-    // Store user data for the connection
-    return { user: data.user };
+    (ctx as Record<string, unknown>).user = data.user;
+    return undefined;
   },
 
   /**
@@ -68,7 +77,6 @@ export const websocketRoutes = new Elysia().ws("/ws/notifications", {
 
     // Subscribe to channels based on role
     if (role === "admin") {
-      // Admins get admin-notifications channel
       ws.subscribe("admin-notifications");
       console.log(`[WebSocket] Subscribed admin ${user.email} to admin-notifications`);
     }
@@ -82,7 +90,10 @@ export const websocketRoutes = new Elysia().ws("/ws/notifications", {
       JSON.stringify({
         type: "connected",
         timestamp: new Date().toISOString(),
-        channels: role === "admin" ? ["admin-notifications", `user-${user.id}`] : [`user-${user.id}`],
+        channels:
+          role === "admin"
+            ? ["admin-notifications", `user-${user.id}`]
+            : [`user-${user.id}`],
       })
     );
   },
@@ -92,21 +103,23 @@ export const websocketRoutes = new Elysia().ws("/ws/notifications", {
    *
    * Supports ping/pong and acknowledgment messages
    */
-  message(ws, message: WebSocketMessage) {
+  message(ws, raw) {
     try {
+      // Without a body schema Elysia may deliver the raw string
+      const message: WebSocketMessage =
+        typeof raw === "string" ? JSON.parse(raw) : (raw as WebSocketMessage);
+
       switch (message.type) {
         case "ping":
-          // Respond with pong
           ws.send(JSON.stringify({ type: "pong", timestamp: new Date().toISOString() }));
           break;
 
         case "ack":
-          // Acknowledge receipt of notification
           console.log(`[WebSocket] Acknowledged: ${message.id}`);
           break;
 
         default:
-          console.log(`[WebSocket] Received message type: ${message.type}`);
+          console.log(`[WebSocket] Received message type: ${(message as { type: string }).type}`);
       }
     } catch (error) {
       console.error("[WebSocket] Error handling message:", error);
@@ -122,13 +135,10 @@ export const websocketRoutes = new Elysia().ws("/ws/notifications", {
   /**
    * Handle connection close
    *
-   * Cleanup subscriptions
+   * Cleanup subscriptions (automatic on close)
    */
   close(ws) {
-    const user = (ws.data as unknown as { user: User }).user;
-    console.log(`[WebSocket] Disconnected: ${user.email}`);
-
-    // Unsubscribe is automatic when connection closes
+    const user = (ws.data as unknown as { user?: User }).user;
+    console.log(`[WebSocket] Disconnected: ${user?.email ?? "unknown"}`);
   },
 });
-

@@ -98,27 +98,18 @@ async function handleTransferSuccess(data: PaystackTransferEvent["data"]): Promi
   const bankName = member?.bank_name || "your bank";
   const bankAccount = member?.bank_account || "****";
 
-  const notificationService = NotificationService.getInstance();
-
-  await notificationService.sendPushNotifications([loan.member_id], {
-    title: "Loan Disbursed",
-    body: `Your loan of ₦${amount.toLocaleString()} has been disbursed to your account (${bankName} - ${bankAccount}). First repayment due soon.`,
-    data: {
-      type: "loan_disbursed",
-      loanId: loan.id,
-      amount_approved: amount,
-    },
-  });
-
-  await supabase.from("notifications").insert({
-    member_id: loan.member_id,
-    title: "Loan Disbursed",
-    body: `Your loan of ₦${amount.toLocaleString()} has been disbursed to your account (${bankName} - ${bankAccount}). First repayment due soon.`,
+  await NotificationService.getInstance().notify({
+    userIds: [loan.member_id],
     type: "loan",
+    title: "Loan Disbursed",
+    body: `Your loan of ₦${amount.toLocaleString()} has been disbursed to your account (${bankName} - ${bankAccount}). First repayment due soon.`,
     data: {
+      event: "loan_disbursed",
       loan_id: loan.id,
       amount_approved: amount,
     },
+    action: { label: "View Details", url: `/loans/${loan.id}` },
+    notifyAdmins: true,
   });
 
   await writeAuditLog({
@@ -165,44 +156,21 @@ async function handleTransferFailed(data: PaystackTransferEvent["data"]): Promis
     })
     .eq("id", loan.id);
 
-  const notificationService = NotificationService.getInstance();
-
-  await notificationService.sendPushNotifications([loan.member_id], {
-    title: "Loan Disbursement Failed",
-    body: "There was an issue disbursing your loan. Please contact support or update your bank details.",
-    data: {
-      type: "loan_disbursement_failed",
-      loanId: loan.id,
-    },
-  });
-
-  await supabase.from("notifications").insert({
-    member_id: loan.member_id,
-    title: "Loan Disbursement Failed",
-    body: "There was an issue disbursing your loan. Please contact support or update your bank details.",
+  await NotificationService.getInstance().notify({
+    userIds: [loan.member_id],
     type: "loan",
+    title: "Loan Disbursement Failed",
+    body: "There was an issue disbursing your loan. Please contact support or update your bank details.",
     data: {
+      event: "loan_disbursement_failed",
       loan_id: loan.id,
+      member_id: loan.member_id,
+      reference,
     },
+    action: { label: "View Details", url: `/loans/${loan.id}` },
+    notifyAdmins: true,
+    pushAdmins: true,
   });
-
-  const { data: admins } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("role", "admin");
-
-  if (admins) {
-    const adminIds = admins.map((a) => a.id);
-    await notificationService.sendPushNotifications(adminIds, {
-      title: "Loan Disbursement Failed",
-      body: `Loan disbursement failed for loan ${loan.id}. Transfer reference: ${reference}. Please review.`,
-      data: {
-        type: "loan_disbursement_failed",
-        loanId: loan.id,
-        member_id: loan.member_id,
-      },
-    });
-  }
 
   await writeAuditLog({
     actor_id: "webhook",
@@ -238,26 +206,21 @@ async function handleTransferReversed(data: PaystackTransferEvent["data"]): Prom
     return;
   }
 
-  const notificationService = NotificationService.getInstance();
-
-  const { data: admins } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("role", "admin");
-
-  if (admins) {
-    const adminIds = admins.map((a) => a.id);
-    await notificationService.sendPushNotifications(adminIds, {
-      title: "Loan Disbursement Reversed",
-      body: `A loan disbursement for loan ${loan.id} has been reversed by Paystack. Immediate action required.`,
-      data: {
-        type: "loan_disbursement_reversed",
-        loanId: loan.id,
-        member_id: loan.member_id,
-        reference,
-      },
-    });
-  }
+  // Admin-only: no member inbox row, just admin WS channel + admin push
+  await NotificationService.getInstance().notify({
+    userIds: [],
+    type: "loan",
+    title: "Loan Disbursement Reversed",
+    body: `A loan disbursement for loan ${loan.id} has been reversed by Paystack. Immediate action required.`,
+    data: {
+      event: "loan_disbursement_reversed",
+      loan_id: loan.id,
+      member_id: loan.member_id,
+      reference,
+    },
+    notifyAdmins: true,
+    pushAdmins: true,
+  });
 
   await writeAuditLog({
     actor_id: "webhook",

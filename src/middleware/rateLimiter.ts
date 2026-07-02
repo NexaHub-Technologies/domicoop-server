@@ -19,21 +19,27 @@ const getClientId = (req: Request) => {
   return ip;
 };
 
+// scoping: "scoped" limits only the route group that mounts the plugin —
+// the default ("global") registers an app-wide onRequest hook, which made
+// the 10/min auth limit apply to every endpoint.
 export const authRateLimit = rateLimit({
   max: 10,
   duration: 60_000,
   generator: getClientId,
+  scoping: "scoped",
   errorResponse: errResponse("Too many auth attempts. Wait 1 minute."),
 });
 export const paymentRateLimit = rateLimit({
   max: 30,
   duration: 60_000,
   generator: getClientId,
+  scoping: "scoped",
   errorResponse: errResponse("Too many payment requests."),
 });
 export const generalRateLimit = rateLimit({
   max: 100,
   duration: 60_000,
   generator: getClientId,
+  scoping: "scoped",
   errorResponse: errResponse("Rate limit exceeded."),
 });

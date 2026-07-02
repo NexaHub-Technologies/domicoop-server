@@ -4,6 +4,7 @@ import { requireAdmin } from "@/middleware/requireAdmin";
 import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
 import { paginationQS, paginate } from "@/utils/validators";
+import { NotificationService } from "@/services/notificationService";
 
 export const memberRoutes = new Elysia({ prefix: "/members" })
 
@@ -194,6 +195,15 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
       entity: "profiles",
       entity_id: params.id,
     });
+
+    await NotificationService.getInstance().notify({
+      userIds: [params.id],
+      type: "security",
+      title: "Membership Approved",
+      body: `Welcome to DOMICOP! Your membership has been approved. Your member number is ${memberNo}.`,
+      data: { event: "member_approved", member_no: memberNo },
+    });
+
     return data;
   })
 

@@ -339,6 +339,44 @@ export type Database = {
           },
         ]
       }
+      notification_devices: {
+        Row: {
+          created_at: string
+          device_name: string | null
+          id: string
+          member_id: string
+          platform: string
+          token: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          device_name?: string | null
+          id?: string
+          member_id: string
+          platform?: string
+          token: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          device_name?: string | null
+          id?: string
+          member_id?: string
+          platform?: string
+          token?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_devices_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notification_logs: {
         Row: {
           body: string
@@ -391,30 +429,33 @@ export type Database = {
       }
       notification_preferences: {
         Row: {
-          announcements_enabled: boolean | null
+          contribution_enabled: boolean
+          dividend_enabled: boolean
           id: string
-          loans_enabled: boolean | null
+          loan_enabled: boolean
+          meeting_enabled: boolean
           member_id: string | null
-          messages_enabled: boolean | null
-          payments_enabled: boolean | null
+          push_enabled: boolean
           updated_at: string | null
         }
         Insert: {
-          announcements_enabled?: boolean | null
+          contribution_enabled?: boolean
+          dividend_enabled?: boolean
           id?: string
-          loans_enabled?: boolean | null
+          loan_enabled?: boolean
+          meeting_enabled?: boolean
           member_id?: string | null
-          messages_enabled?: boolean | null
-          payments_enabled?: boolean | null
+          push_enabled?: boolean
           updated_at?: string | null
         }
         Update: {
-          announcements_enabled?: boolean | null
+          contribution_enabled?: boolean
+          dividend_enabled?: boolean
           id?: string
-          loans_enabled?: boolean | null
+          loan_enabled?: boolean
+          meeting_enabled?: boolean
           member_id?: string | null
-          messages_enabled?: boolean | null
-          payments_enabled?: boolean | null
+          push_enabled?: boolean
           updated_at?: string | null
         }
         Relationships: [
@@ -429,6 +470,7 @@ export type Database = {
       }
       notifications: {
         Row: {
+          action: Json | null
           body: string
           created_at: string
           data: Json | null
@@ -439,6 +481,7 @@ export type Database = {
           type: string
         }
         Insert: {
+          action?: Json | null
           body: string
           created_at?: string
           data?: Json | null
@@ -449,6 +492,7 @@ export type Database = {
           type: string
         }
         Update: {
+          action?: Json | null
           body?: string
           created_at?: string
           data?: Json | null
@@ -639,6 +683,10 @@ export type Database = {
     }
     Functions: {
       cleanup_old_notifications: { Args: never; Returns: number }
+      unread_notification_counts: {
+        Args: { user_ids: string[] }
+        Returns: { member_id: string; unread: number }[]
+      }
     }
     Enums: {
       [_ in never]: never

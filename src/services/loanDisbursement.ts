@@ -177,99 +177,55 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
 }
 
 async function sendApprovalNotification(loan: LoanWithProfile): Promise<void> {
-  const notificationService = NotificationService.getInstance();
-
-  await notificationService.sendPushNotifications([loan.member_id], {
+  await NotificationService.getInstance().notify({
+    userIds: [loan.member_id],
+    type: "loan",
     title: "Loan Approved",
     body: `Your loan of ₦${loan.amount_approved.toLocaleString()} has been approved! Monthly repayment: ₦${loan.monthly_repayment.toLocaleString()} for ${loan.tenure_months} months.`,
     data: {
-      type: "loan_approved",
-      loanId: loan.id,
+      event: "loan_approved",
+      loan_id: loan.id,
       amount_approved: loan.amount_approved,
       monthly_repayment: loan.monthly_repayment,
       tenure_months: loan.tenure_months,
       interest_rate: loan.interest_rate,
     },
-  });
-
-  await supabase.from("notifications").insert({
-    member_id: loan.member_id,
-    title: "Loan Approved",
-    body: `Your loan of ₦${loan.amount_approved.toLocaleString()} has been approved! Monthly repayment: ₦${loan.monthly_repayment.toLocaleString()} for ${loan.tenure_months} months.`,
-    type: "loan",
-    data: {
-      loan_id: loan.id,
-      amount_approved: loan.amount_approved,
-      monthly_repayment: loan.monthly_repayment,
-      tenure_months: loan.tenure_months,
-    },
+    action: { label: "View Details", url: `/loans/${loan.id}` },
   });
 }
 
 async function sendDisbursementSuccessNotification(loan: LoanWithProfile): Promise<void> {
-  const notificationService = NotificationService.getInstance();
-
-  await notificationService.sendPushNotifications([loan.member_id], {
-    title: "Loan Disbursed",
-    body: `Your loan of ₦${loan.amount_approved.toLocaleString()} has been disbursed to your account (${loan.profiles.bank_name} - ${loan.profiles.bank_account}). First repayment due soon.`,
-    data: {
-      type: "loan_disbursed",
-      loanId: loan.id,
-      amount_approved: loan.amount_approved,
-    },
-  });
-
-  await supabase.from("notifications").insert({
-    member_id: loan.member_id,
-    title: "Loan Disbursed",
-    body: `Your loan of ₦${loan.amount_approved.toLocaleString()} has been disbursed to your account (${loan.profiles.bank_name} - ${loan.profiles.bank_account}). First repayment due soon.`,
+  await NotificationService.getInstance().notify({
+    userIds: [loan.member_id],
     type: "loan",
+    title: "Loan Disbursed",
+    body: `Your loan of ₦${loan.amount_approved.toLocaleString()} has been disbursed to your account (${loan.profiles.bank_name} - ${loan.profiles.bank_account}). First repayment due soon.`,
     data: {
+      event: "loan_disbursed",
       loan_id: loan.id,
       amount_approved: loan.amount_approved,
     },
+    action: { label: "View Details", url: `/loans/${loan.id}` },
+    notifyAdmins: true,
   });
 }
 
 async function sendDisbursementFailedNotification(loan: LoanWithProfile): Promise<void> {
-  const notificationService = NotificationService.getInstance();
-
-  await notificationService.sendPushNotifications([loan.member_id], {
-    title: "Loan Disbursement Failed",
-    body: "There was an issue disbursing your loan. Please contact support or update your bank details.",
-    data: {
-      type: "loan_disbursement_failed",
-      loanId: loan.id,
-    },
-  });
-
-  await supabase.from("notifications").insert({
-    member_id: loan.member_id,
-    title: "Loan Disbursement Failed",
-    body: "There was an issue disbursing your loan. Please contact support or update your bank details.",
+  await NotificationService.getInstance().notify({
+    userIds: [loan.member_id],
     type: "loan",
+    title: "Loan Disbursement Failed",
+    body: "There was an issue disbursing your loan. Please contact support or update your bank details.",
     data: {
+      event: "loan_disbursement_failed",
       loan_id: loan.id,
+      member_id: loan.member_id,
+      member_name: loan.profiles.full_name,
     },
+    action: { label: "View Details", url: `/loans/${loan.id}` },
+    notifyAdmins: true,
+    pushAdmins: true,
   });
-
-  const { data: admins } = await supabase
-    .from("profiles")
-    .select("id")
-    .eq("role", "admin");
-
-  if (admins) {
-    const adminIds = admins.map((a) => a.id);
-    await notificationService.sendPushNotifications(adminIds, {
-      title: "Loan Disbursement Failed",
-      body: `Loan disbursement failed for member ${loan.profiles.full_name}. Please review.`,
-      data: {
-        type: "loan_disbursement_failed",
-        loanId: loan.id,
-        member_id: loan.member_id,
-      },
-    });
-  }
 }
 
 export async function notifyLoanApproved(loanId: string): Promise<void> {
