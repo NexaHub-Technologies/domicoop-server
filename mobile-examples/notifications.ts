@@ -1,8 +1,14 @@
 /**
- * Expo Push Notifications Integration
+ * Expo Push Notifications Integration (notifications v2 REST contract)
  *
- * Complete implementation for handling push notifications in Expo mobile app.
- * Includes permission handling, token registration, and notification handlers.
+ * Complete implementation for handling push notifications in the Expo app.
+ * Includes permission handling, device registration, tap navigation via the
+ * server-provided `data.url`, and mark-as-read on tap.
+ *
+ * Server push payloads carry:
+ *   data: { url, notification_id, type }   // url = in-app expo-router path
+ *   badge: <unread count>                  // applied automatically by the OS
+ *   channelId: "default"                   // must exist on Android (see below)
  *
  * @module mobile/notifications
  * @requires expo-notifications
@@ -10,11 +16,11 @@
  *
  * @example
  * ```typescript
- * import { registerForPushNotifications, setupNotificationHandlers } from './notifications';
+ * import { registerForPushNotificationsAsync, setupNotificationHandlers } from './notifications';
  *
- * // In your app initialization:
+ * // In your app initialization (after login):
  * useEffect(() => {
- *   registerForPushNotifications();
+ *   registerForPushNotificationsAsync();
  *   setupNotificationHandlers();
  * }, []);
  * ```
@@ -25,29 +31,35 @@ import * as Device from "expo-device";
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
+import { useState, useEffect } from "react";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || "https://your-api.com";
 
+const PUSH_TOKEN_KEY = "expo_push_token";
+
+async function authHeaders(): Promise<Record<string, string> | null> {
+  const accessToken = await SecureStore.getItemAsync("access_token");
+  if (!accessToken) {
+    console.error("[Notifications] No access token available");
+    return null;
+  }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
 /**
- * Register for push notifications and save token to backend
+ * Register for push notifications and save the device to the backend.
  *
- * Requests permissions, gets Expo push token, and sends it to the backend.
- * Should be called on app startup or after user login.
+ * Requests permissions, gets the Expo push token, and registers it via
+ * POST /v1/notifications/devices (idempotent upsert on token). Should be
+ * called after login and on app startup.
  *
  * @returns {Promise<string | null>} Expo push token or null if failed
- *
- * @example
- * ```typescript
- * const token = await registerForPushNotificationsAsync();
- * if (token) {
- *   console.log('Push token:', token);
- * }
- * ```
  */
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
-  let token: string | null = null;
-
-  // Configure Android notification channel
+  // The server sends channelId: "default" — the channel must exist on Android
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync("default", {
       name: "default",
@@ -57,176 +69,197 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     });
   }
 
-  // Only get token on physical device (not simulator)
-  if (Device.isDevice) {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-
-    // Request permission if not granted
-    if (existingStatus !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-
-    if (finalStatus !== "granted") {
-      console.log("[Notifications] Permission not granted");
-      return null;
-    }
-
-    // Get Expo push token
-    try {
-      const expoToken = await Notifications.getExpoPushTokenAsync({
-        projectId: "005a3826-e772-4bfa-8f5c-6be57a2232ca",
-      });
-      token = expoToken.data;
-
-      // Save to backend
-      await saveExpoPushToken(token);
-    } catch (error) {
-      console.error("[Notifications] Error getting push token:", error);
-      return null;
-    }
-  } else {
+  // Only physical devices can receive remote push (not simulators/emulators)
+  if (!Device.isDevice) {
     console.log("[Notifications] Must use physical device for push notifications");
+    return null;
   }
 
-  return token;
+  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
+
+  if (existingStatus !== "granted") {
+    const { status } = await Notifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
+
+  if (finalStatus !== "granted") {
+    console.log("[Notifications] Permission not granted");
+    return null;
+  }
+
+  try {
+    const expoToken = await Notifications.getExpoPushTokenAsync({
+      projectId: "005a3826-e772-4bfa-8f5c-6be57a2232ca",
+    });
+    const token = expoToken.data;
+
+    await registerDevice(token);
+    await SecureStore.setItemAsync(PUSH_TOKEN_KEY, token);
+    return token;
+  } catch (error) {
+    console.error("[Notifications] Error getting push token:", error);
+    return null;
+  }
 }
 
 /**
- * Save Expo push token to backend
+ * Register this device with the backend.
  *
- * @private
- * @param {string} token - Expo push token
- * @returns {Promise<void>}
+ * POST /v1/notifications/devices — idempotent upsert on token (201 on first
+ * registration, 200 afterwards). A token belongs to whoever registered it
+ * last, so re-registering after a user switch reassigns it correctly.
  */
-async function saveExpoPushToken(token: string): Promise<void> {
+async function registerDevice(token: string): Promise<void> {
+  const headers = await authHeaders();
+  if (!headers) return;
+
   try {
-    const accessToken = await SecureStore.getItemAsync("access_token");
-
-    if (!accessToken) {
-      console.error("[Notifications] No access token available");
-      return;
-    }
-
-    const response = await fetch(`${API_URL}/notifications/expo-token`, {
+    const response = await fetch(`${API_URL}/v1/notifications/devices`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ expo_push_token: token }),
+      headers,
+      body: JSON.stringify({
+        token,
+        platform: Platform.OS === "ios" ? "ios" : "android",
+        device_name: Device.deviceName ?? undefined,
+      }),
     });
 
     if (!response.ok) {
-      console.error("[Notifications] Failed to save token:", await response.text());
+      console.error("[Notifications] Failed to register device:", await response.text());
     } else {
-      console.log("[Notifications] Token saved successfully");
+      console.log("[Notifications] Device registered");
     }
   } catch (error) {
-    console.error("[Notifications] Error saving token:", error);
+    console.error("[Notifications] Error registering device:", error);
   }
 }
 
 /**
- * Delete push token from backend
+ * Unregister this device — call on logout to stop receiving push.
  *
- * Call this on logout to stop receiving notifications
- *
- * @returns {Promise<void>}
- *
- * @example
- * ```typescript
- * await deleteExpoPushToken();
- * ```
+ * POST /v1/notifications/devices/unregister (POST, not DELETE, because Expo
+ * tokens contain `[]` which break URL paths).
  */
-export async function deleteExpoPushToken(): Promise<void> {
+export async function unregisterDevice(): Promise<void> {
+  const headers = await authHeaders();
+  const token = await SecureStore.getItemAsync(PUSH_TOKEN_KEY);
+  if (!headers || !token) return;
+
   try {
-    const accessToken = await SecureStore.getItemAsync("access_token");
-
-    if (!accessToken) return;
-
-    const response = await fetch(`${API_URL}/notifications/expo-token`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
+    const response = await fetch(`${API_URL}/v1/notifications/devices/unregister`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ token }),
     });
 
     if (response.ok) {
-      console.log("[Notifications] Token deleted successfully");
+      await SecureStore.deleteItemAsync(PUSH_TOKEN_KEY);
+      console.log("[Notifications] Device unregistered");
     }
   } catch (error) {
-    console.error("[Notifications] Error deleting token:", error);
+    console.error("[Notifications] Error unregistering device:", error);
   }
 }
 
 /**
- * Setup notification handlers
+ * Setup notification handlers.
  *
- * Configures how the app handles received notifications.
+ * Configures foreground display and tap handling. On tap the app navigates
+ * to the server-provided in-app path (`data.url`) and marks the notification
+ * as read so the badge count stays accurate.
+ *
  * Should be called once on app initialization.
- *
- * @returns {void}
- *
- * @example
- * ```typescript
- * useEffect(() => {
- *   setupNotificationHandlers();
- * }, []);
- * ```
  */
 export function setupNotificationHandlers(): void {
-  // Handle notifications received while app is foregrounded
+  // How notifications display while the app is foregrounded
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
       shouldPlaySound: true,
       shouldSetBadge: true,
     }),
   });
 
-  // Handle notification response (user taps notification)
+  // User tapped a notification (from background or killed state)
   Notifications.addNotificationResponseReceivedListener((response) => {
-    const data = response.notification.request.content.data;
+    const data = response.notification.request.content.data as {
+      url?: string | null;
+      notification_id?: string | null;
+      type?: string;
+    };
 
     console.log("[Notifications] User tapped notification:", data);
 
-    // Navigate based on notification type
+    if (data?.notification_id) {
+      markAsRead(data.notification_id);
+    }
+
     handleNotificationNavigation(data);
   });
 
-  // Handle notifications received while app is backgrounded
+  // Notification received while the app is foregrounded
   Notifications.addNotificationReceivedListener((notification) => {
-    console.log("[Notifications] Received in background:", notification);
+    console.log("[Notifications] Received in foreground:", notification);
   });
 }
 
 /**
- * Handle navigation from notification tap
+ * Mark a notification as read on the backend (fire-and-forget).
  *
- * @private
- * @param {any} data - Notification data payload
+ * PATCH /v1/notifications/{id}/read — idempotent; returns the updated
+ * notification and the new unread_count.
  */
-function handleNotificationNavigation(data: any): void {
-  if (!data?.type) return;
+async function markAsRead(notificationId: string): Promise<void> {
+  const headers = await authHeaders();
+  if (!headers) return;
 
-  switch (data.type) {
+  try {
+    const response = await fetch(
+      `${API_URL}/v1/notifications/${notificationId}/read`,
+      { method: "PATCH", headers },
+    );
+    if (response.ok) {
+      const { unread_count } = await response.json();
+      await Notifications.setBadgeCountAsync(unread_count);
+    }
+  } catch (error) {
+    console.error("[Notifications] Error marking as read:", error);
+  }
+}
+
+/**
+ * Navigate from a notification tap.
+ *
+ * `data.url` is always an in-app expo-router path with a leading slash
+ * (e.g. "/loans/loan-004"); fall back to a per-type screen if absent.
+ */
+function handleNotificationNavigation(data: {
+  url?: string | null;
+  type?: string;
+}): void {
+  if (data?.url) {
+    router.push(data.url as never);
+    return;
+  }
+
+  switch (data?.type) {
     case "loan":
       router.push("/loans");
       break;
-    case "payment":
     case "contribution":
+    case "dividend":
       router.push("/contributions");
       break;
-    case "message":
+    case "security":
       router.push("/messages");
       break;
-    case "announcement":
+    case "meeting":
       router.push("/announcements");
       break;
     default:
-      console.log("[Notifications] Unknown type:", data.type);
+      console.log("[Notifications] No route for type:", data?.type);
   }
 }
 
@@ -270,6 +303,3 @@ export function usePushNotifications() {
 
   return { expoPushToken, notification };
 }
-
-// Import React hook dependencies
-import { useState, useEffect } from "react";
