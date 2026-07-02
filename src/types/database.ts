@@ -7,6 +7,36 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.5"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       announcements: {
@@ -199,7 +229,6 @@ export type Database = {
           balance: number | null
           created_at: string
           disbursed_at: string | null
-          disbursement_pending_otp: boolean | null
           due_date: string | null
           id: string
           interest_rate: number | null
@@ -220,7 +249,6 @@ export type Database = {
           balance?: number | null
           created_at?: string
           disbursed_at?: string | null
-          disbursement_pending_otp?: boolean | null
           due_date?: string | null
           id?: string
           interest_rate?: number | null
@@ -241,7 +269,6 @@ export type Database = {
           balance?: number | null
           created_at?: string
           disbursed_at?: string | null
-          disbursement_pending_otp?: boolean | null
           due_date?: string | null
           id?: string
           interest_rate?: number | null
@@ -685,7 +712,10 @@ export type Database = {
       cleanup_old_notifications: { Args: never; Returns: number }
       unread_notification_counts: {
         Args: { user_ids: string[] }
-        Returns: { member_id: string; unread: number }[]
+        Returns: {
+          member_id: string
+          unread: number
+        }[]
       }
     }
     Enums: {
@@ -815,8 +845,10 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {},
   },
 } as const
-
