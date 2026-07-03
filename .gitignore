@@ -37,3 +37,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .agents
 skills-lock.json
 CLAUDE.md
+
+# folders
+/mds
+/mobile-examples
+/docs
+/scripts
