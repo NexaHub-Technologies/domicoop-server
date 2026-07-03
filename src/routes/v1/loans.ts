@@ -3,6 +3,7 @@ import { authenticate } from "@/middleware/authenticate";
 import { requireAdmin } from "@/middleware/requireAdmin";
 import { requireActive } from "@/middleware/requireActive";
 import { supabase } from "@/lib/supabase";
+import { paystack } from "@/lib/paystack";
 import { writeAuditLog } from "@/utils/audit";
 import { paginationQS, paginate } from "@/utils/validators";
 import type { Database } from "@/types/database";
@@ -92,22 +93,12 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
     return data;
   })
 
-  // POST /loans/:id/repayment - Process loan repayment from Paystack verified response
+  // POST /loans/:id/repayment - Verify a Paystack payment server-side and apply
+  // it to the loan. The client sends only the transaction reference; amount and
+  // status come from Paystack, never from the client.
   .post(
     "/:id/repayment",
-    async ({ params, body, userId }) => {
-      const paystackData = body as {
-        reference: string;
-        amount: number;
-        channel: string;
-        customer: {
-          email: string;
-          first_name: string | null;
-          last_name: string | null;
-        };
-        metadata?: Record<string, unknown>;
-      };
-
+    async ({ params, body, userId, set }) => {
       const { data: loan, error: loanError } = await supabase
         .from("loans")
         .select("id, member_id, balance, status")
@@ -119,7 +110,58 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         throw new Error("Loan not found or does not belong to member");
       }
 
-      const amount = paystackData.amount / 100;
+      let tx;
+      try {
+        tx = await paystack.verifyTransaction(body.reference);
+      } catch (err) {
+        set.status = 404;
+        return {
+          success: false,
+          reason: "reference_not_found",
+          message: err instanceof Error ? err.message : "Verification failed",
+        };
+      }
+
+      if (tx.status !== "success") {
+        set.status = 402;
+        return { success: false, reason: "payment_not_successful", status: tx.status };
+      }
+      if (tx.currency !== "NGN") {
+        set.status = 422;
+        return { success: false, reason: "unsupported_currency", currency: tx.currency };
+      }
+
+      // Record the transaction BEFORE touching the balance: paystack_ref is
+      // UNIQUE, so a replayed reference fails here and cannot double-credit.
+      const { error: txError } = await supabase.from("transactions").insert({
+        paystack_ref: tx.reference,
+        member_id: userId!,
+        amount: tx.amount,
+        type: "loan_repayment",
+        status: "success",
+        channel: tx.channel,
+        loan_id: params.id,
+        metadata: {
+          gateway_response: tx.gateway_response,
+          paid_at: tx.paid_at,
+          verified_at: new Date().toISOString(),
+        } as unknown as Database["public"]["Tables"]["transactions"]["Row"]["metadata"],
+      });
+
+      if (txError) {
+        if (txError.code === "23505") {
+          return {
+            success: true,
+            already_processed: true,
+            loan_id: params.id,
+            remaining_balance: Number(loan.balance),
+            status: loan.status,
+          };
+        }
+        throw new Error(`Failed to record transaction: ${txError.message}`);
+      }
+
+      const amount = tx.amount / 100;
       const newBalance = Math.max(0, Number(loan.balance) - amount);
 
       const { error: updateError } = await supabase
@@ -135,24 +177,6 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         throw new Error(`Failed to update loan: ${updateError.message}`);
       }
 
-      const { error: txError } = await supabase.from("transactions").insert({
-        paystack_ref: paystackData.reference,
-        member_id: userId!,
-        amount: paystackData.amount,
-        type: "loan_repayment",
-        status: "success",
-        channel: paystackData.channel,
-        loan_id: params.id,
-        metadata: {
-          paystack_response: paystackData,
-          processed_at: new Date().toISOString(),
-        } as unknown as Database["public"]["Tables"]["transactions"]["Row"]["metadata"],
-      });
-
-      if (txError) {
-        throw new Error(`Failed to record transaction: ${txError.message}`);
-      }
-
       await NotificationService.getInstance().notify({
         userIds: [userId!],
         type: "loan",
@@ -161,7 +185,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         data: {
           event: "loan_repayment",
           loan_id: params.id,
-          reference: paystackData.reference,
+          reference: tx.reference,
           amount: amount,
         },
         action: { label: "View Details", url: `/loans/${params.id}` },
@@ -178,15 +202,7 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
     },
     {
       body: t.Object({
-        reference: t.String(),
-        amount: t.Number(),
-        channel: t.String(),
-        customer: t.Object({
-          email: t.String(),
-          first_name: t.Optional(t.String()),
-          last_name: t.Optional(t.String()),
-        }),
-        metadata: t.Optional(t.Record(t.String(), t.Unknown())),
+        reference: t.String({ minLength: 1 }),
       }),
     },
   )

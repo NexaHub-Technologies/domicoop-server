@@ -1,34 +1,46 @@
-import Elysia, { t } from "elysia";
-import { validateWebhook } from "@/middleware/validateWebhook";
+import Elysia from "elysia";
+import { verifyPaystackSignature } from "@/middleware/validateWebhook";
 import { supabase } from "@/lib/supabase";
 import type { PaystackTransferEvent } from "@/lib/paystack";
 import { NotificationService } from "@/services/notificationService";
 import { writeAuditLog } from "@/utils/audit";
+import { allocateContribution } from "@/services/contributionAllocation";
 
 export const webhookRoutes = new Elysia({ prefix: "/webhooks" })
-  .use(validateWebhook)
   .post(
     "/paystack",
-    async (context) => {
-      const webhookPayload = (context as any).webhookPayload;
-      const signature = context.request.headers.get("x-paystack-signature");
+    async ({ body, request, set }) => {
+      // Custom parse keeps the raw body string: the HMAC is computed over the
+      // exact bytes Paystack sent, so we must not JSON-parse before verifying.
+      const rawBody = body as string;
+      const signature = request.headers.get("x-paystack-signature");
 
-      if (!signature || !webhookPayload) {
-        return { received: true };
+      if (!signature || !verifyPaystackSignature(rawBody, signature)) {
+        set.status = 401;
+        return { error: "Invalid webhook signature" };
       }
 
-      const event = webhookPayload as PaystackTransferEvent;
+      let event: { event: string; data: unknown };
+      try {
+        event = JSON.parse(rawBody);
+      } catch {
+        set.status = 400;
+        return { error: "Invalid JSON payload" };
+      }
       console.log("[Paystack Webhook] Event received:", event.event);
 
       switch (event.event) {
+        case "charge.success":
+          await handleChargeSuccess(event.data as PaystackChargeEventData);
+          break;
         case "transfer.success":
-          await handleTransferSuccess(event.data);
+          await handleTransferSuccess(event.data as PaystackTransferEvent["data"]);
           break;
         case "transfer.failed":
-          await handleTransferFailed(event.data);
+          await handleTransferFailed(event.data as PaystackTransferEvent["data"]);
           break;
         case "transfer.reversed":
-          await handleTransferReversed(event.data);
+          await handleTransferReversed(event.data as PaystackTransferEvent["data"]);
           break;
         default:
           console.log(`[Paystack Webhook] Unhandled event type: ${event.event}`);
@@ -37,21 +49,117 @@ export const webhookRoutes = new Elysia({ prefix: "/webhooks" })
       return { received: true };
     },
     {
-      body: t.Object({
-        event: t.String(),
-        data: t.Object({
-          reference: t.String(),
-          amount: t.Number(),
-          status: t.String(),
-          transfer_code: t.String(),
-          recipient: t.Object({
-            recipient_code: t.String(),
-            name: t.String(),
-          }),
-        }),
-      }),
+      // Keep the raw body for signature verification; event shapes differ per
+      // event type (charge.* vs transfer.*), handlers narrow the payload.
+      parse: ({ request }) => request.text(),
     },
   );
+
+interface PaystackChargeEventData {
+  reference: string;
+  amount: number;
+  status: string;
+  currency: string;
+  channel: string;
+  paid_at: string | null;
+  customer?: { email?: string };
+}
+
+/**
+ * Independent server-side payment confirmation. If a pending contribution
+ * exists for this reference, confirm it (allocation + notification). If the
+ * reference was already processed by POST /contributions/verify, no-op.
+ */
+async function handleChargeSuccess(data: PaystackChargeEventData): Promise<void> {
+  const reference = data.reference;
+  if (!reference || data.status !== "success") return;
+
+  // Already settled by the /verify endpoint (or an earlier webhook delivery)?
+  const { data: existingTx } = await supabase
+    .from("transactions")
+    .select("id")
+    .eq("paystack_ref", reference)
+    .maybeSingle();
+  if (existingTx) {
+    console.log(`[Paystack Webhook] charge.success ${reference} already processed`);
+    return;
+  }
+
+  const { data: contribution } = await supabase
+    .from("contributions")
+    .select()
+    .eq("transaction_ref", reference)
+    .maybeSingle();
+
+  if (!contribution) {
+    console.log(`[Paystack Webhook] charge.success ${reference} matches no contribution, skipping`);
+    return;
+  }
+  if (contribution.payment_status === "success") return;
+
+  // Idempotency gate: unique paystack_ref; a concurrent /verify wins and this no-ops
+  const { error: txError } = await supabase.from("transactions").insert({
+    paystack_ref: reference,
+    member_id: contribution.member_id,
+    amount: data.amount,
+    type: "contribution",
+    status: "success",
+    channel: data.channel,
+    contribution_id: contribution.id,
+    metadata: {
+      source: "webhook_charge_success",
+      paid_at: data.paid_at,
+      processed_at: new Date().toISOString(),
+    },
+  });
+  if (txError) {
+    if (txError.code !== "23505") {
+      console.error("[Paystack Webhook] Failed to record charge transaction:", txError);
+    }
+    return;
+  }
+
+  const amountNaira = data.amount / 100;
+  const allocation = allocateContribution(amountNaira);
+
+  const { error: updateError } = await supabase
+    .from("contributions")
+    .update({
+      payment_status: "success",
+      amount: data.amount,
+      shares: allocation.shares,
+      social: allocation.social,
+      savings: allocation.savings,
+      deposit: allocation.deposit,
+      payment_method: data.channel,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", contribution.id);
+  if (updateError) {
+    console.error("[Paystack Webhook] Failed to confirm contribution:", updateError);
+    return;
+  }
+
+  await NotificationService.getInstance().notify({
+    userIds: [contribution.member_id],
+    type: "contribution",
+    title: "Contribution Received",
+    body: `Your contribution of ₦${amountNaira.toLocaleString()} for ${contribution.month} has been confirmed.`,
+    data: { event: "contribution_recorded", contribution_id: contribution.id, amount: amountNaira, month: contribution.month },
+    action: { label: "View Contributions", url: "/contributions" },
+    notifyAdmins: true,
+  });
+
+  await writeAuditLog({
+    actor_id: "webhook",
+    action: "contribution_verified",
+    entity: "contributions",
+    entity_id: contribution.id,
+    metadata: { paystack_ref: reference, amount: data.amount, channel: data.channel },
+  });
+
+  console.log(`[Paystack Webhook] Contribution ${contribution.id} confirmed via charge.success`);
+}
 
 async function handleTransferSuccess(data: PaystackTransferEvent["data"]): Promise<void> {
   const reference = data.reference;

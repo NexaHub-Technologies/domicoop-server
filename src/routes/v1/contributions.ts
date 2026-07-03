@@ -6,6 +6,8 @@ import { writeAuditLog } from "@/utils/audit";
 import { paginate } from "@/utils/validators";
 import { allocateContribution } from "@/services/contributionAllocation";
 import { NotificationService } from "@/services/notificationService";
+import { paystack } from "@/lib/paystack";
+import type { Database } from "@/types/database";
 
 const notificationService = NotificationService.getInstance();
 
@@ -109,11 +111,17 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
   )
 
   // transactions/add-contribution.tsx → POST /contributions
-  // Allow pending users to create contributions
+  // Allow pending users to create contributions.
+  // Members cannot self-declare a paid contribution: non-admin submissions are
+  // forced to "pending" — the paid path is POST /contributions/verify, where the
+  // server confirms the payment with Paystack itself.
   .post(
     "/",
-    async ({ userId: _userId, body }) => {
+    async ({ userId: _userId, role, body }) => {
       const userId = _userId!;
+      if (role !== "admin" && body.payment_status && body.payment_status !== "pending") {
+        body.payment_status = "pending";
+      }
       const isSuccess = body.payment_status === "success";
       const storedAmount = isSuccess ? body.amount * 100 : body.amount;
       const allocation = isSuccess ? allocateContribution(body.amount) : null;
@@ -163,7 +171,142 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         member_no: t.Optional(t.String()),
         member_email: t.Optional(t.String()),
         payment_method: t.Optional(t.String()),
-        payment_status: t.Optional(t.String()),
+        payment_status: t.Optional(
+          t.Union([
+            t.Literal("success"),
+            t.Literal("failed"),
+            t.Literal("abandoned"),
+            t.Literal("pending"),
+          ]),
+        ),
+        notes: t.Optional(t.String()),
+      }),
+    },
+  )
+
+  // transactions/add-contribution.tsx → POST /contributions/verify
+  // Server-side Paystack verification: the client sends only the transaction
+  // reference; amount and status come from Paystack, never from the client.
+  .post(
+    "/verify",
+    async ({ userId: _userId, body, set }) => {
+      const userId = _userId!;
+      const reference = body.reference;
+
+      // Idempotency pre-check (unique index on transaction_ref backs this up)
+      const { data: existing } = await supabase
+        .from("contributions")
+        .select()
+        .eq("transaction_ref", reference)
+        .maybeSingle();
+      if (existing) {
+        return { verified: true, already_processed: true, contribution: existing };
+      }
+
+      let tx;
+      try {
+        tx = await paystack.verifyTransaction(reference);
+      } catch (err) {
+        set.status = 404;
+        return {
+          verified: false,
+          reason: "reference_not_found",
+          message: err instanceof Error ? err.message : "Verification failed",
+        };
+      }
+
+      if (tx.status !== "success") {
+        return { verified: false, status: tx.status };
+      }
+      if (tx.currency !== "NGN") {
+        set.status = 422;
+        return { verified: false, reason: "unsupported_currency", currency: tx.currency };
+      }
+
+      // Race-safe idempotency gate: transactions.paystack_ref is UNIQUE, so a
+      // concurrent/replayed verify loses here and returns the existing record.
+      const { error: txError } = await supabase.from("transactions").insert({
+        paystack_ref: reference,
+        member_id: userId,
+        amount: tx.amount,
+        type: "contribution",
+        status: "success",
+        channel: tx.channel,
+        metadata: {
+          gateway_response: tx.gateway_response,
+          paid_at: tx.paid_at,
+          verified_at: new Date().toISOString(),
+        } as unknown as Database["public"]["Tables"]["transactions"]["Row"]["metadata"],
+      });
+      if (txError) {
+        if (txError.code === "23505") {
+          const { data: winner } = await supabase
+            .from("contributions")
+            .select()
+            .eq("transaction_ref", reference)
+            .maybeSingle();
+          return { verified: true, already_processed: true, contribution: winner };
+        }
+        throw new Error(`Failed to record transaction: ${txError.message}`);
+      }
+
+      const amountNaira = tx.amount / 100;
+      const allocation = allocateContribution(amountNaira);
+
+      const { data: contribution, error } = await supabase
+        .from("contributions")
+        .insert({
+          member_id: userId,
+          amount: tx.amount,
+          shares: allocation.shares,
+          social: allocation.social,
+          savings: allocation.savings,
+          deposit: allocation.deposit,
+          year: body.year,
+          month: body.month,
+          transaction_ref: reference,
+          member_no: body.member_no ?? null,
+          member_email: body.member_email ?? null,
+          payment_method: tx.channel,
+          payment_status: "success",
+          notes: body.notes ?? null,
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+
+      await supabase
+        .from("transactions")
+        .update({ contribution_id: contribution.id })
+        .eq("paystack_ref", reference);
+
+      await writeAuditLog({
+        actor_id: userId,
+        action: "contribution_verified",
+        entity: "contributions",
+        entity_id: contribution.id,
+        metadata: { paystack_ref: reference, amount: tx.amount, channel: tx.channel },
+      });
+
+      await notificationService.notify({
+        userIds: [userId],
+        type: "contribution",
+        title: "Contribution Received",
+        body: `Your contribution of ₦${amountNaira.toLocaleString()} for ${body.month} has been recorded.`,
+        data: { event: "contribution_recorded", contribution_id: contribution.id, amount: amountNaira, month: body.month },
+        action: { label: "View Contributions", url: "/contributions" },
+        notifyAdmins: true,
+      });
+
+      return { verified: true, contribution };
+    },
+    {
+      body: t.Object({
+        reference: t.String({ minLength: 1 }),
+        year: t.Number(),
+        month: t.String({ pattern: "^[0-9]{4}-[0-9]{2}$" }),
+        member_no: t.Optional(t.String()),
+        member_email: t.Optional(t.String()),
         notes: t.Optional(t.String()),
       }),
     },

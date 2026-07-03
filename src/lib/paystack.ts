@@ -24,7 +24,7 @@
  * ```
  */
 
-const BASE = "https://api.paystack.co";
+const BASE = process.env.PAYSTACK_BASE_URL ?? "https://api.paystack.co";
 const SECRET = process.env.PAYSTACK_SECRET_KEY!;
 
 /**

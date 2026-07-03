@@ -500,7 +500,8 @@ Once the server is running, visit:
 
 #### Contributions (`/contributions`)
 - `GET /contributions/me` - List member contributions with balance summary & transactions
-- `POST /contributions` - Add new contribution
+- `POST /contributions` - Add new contribution (non-admin submissions are stored as `pending`)
+- `POST /contributions/verify` - Verify a Paystack payment server-side and record the contribution. Body: `{ reference, year, month, member_no?, member_email?, notes? }` — amount and status come from Paystack, never the client. Idempotent per reference (`already_processed: true` on replay).
 - `GET /contributions/:id` - Get contribution details
 
 #### Payments (`/payments`)
@@ -512,6 +513,7 @@ Once the server is running, visit:
 - `GET /loans/me` - List member loans
 - `POST /loans/apply` - Apply for loan
 - `GET /loans/:id` - Get loan details
+- `POST /loans/:id/repayment` - Apply a Paystack payment to the loan. Body: `{ reference }` only — the server verifies the transaction with Paystack and uses the verified amount. Replay-safe (unique `paystack_ref`).
 
 #### Messages (`/messages`)
 - `GET /messages/me` - Get support tickets
@@ -526,7 +528,9 @@ Once the server is running, visit:
 - `GET /announcements` - Get published announcements
 
 #### Webhook
-- `POST /payments/webhook` - Paystack webhook handler
+- `POST /v1/webhooks/paystack` - Paystack webhook handler (HMAC-SHA512 signature required). Handles `charge.success` (confirms pending contributions independently of the app) and `transfer.success/failed/reversed` (loan disbursements). Set `PAYSTACK_WEBHOOK_SECRET` to the Paystack secret key — Paystack signs webhooks with it — and register the URL in the Paystack dashboard.
+
+> **Payment verification is server-side.** Clients never send amounts or payment statuses for paid flows; they send only the Paystack `reference`, and this server verifies it with Paystack using the secret key. The Paystack secret key must never ship in a client bundle.
 
 ## Project Structure
 
