@@ -178,7 +178,7 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
       .from("profiles")
       .select("*", { count: "exact", head: true })
       .eq("status", "active");
-    const memberNo = `DOMICOP-${String((count ?? 0) + 1).padStart(4, "0")}`;
+    const memberNo = `DOMICOOP-${String((count ?? 0) + 1).padStart(4, "0")}`;
     const { data, error } = await supabase
       .from("profiles")
       .update({
@@ -201,7 +201,7 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
       userIds: [params.id],
       type: "security",
       title: "Membership Approved",
-      body: `Welcome to DOMICOP! Your membership has been approved. Your member number is ${memberNo}.`,
+      body: `Welcome to DOMICOOP! Your membership has been approved. Your member number is ${memberNo}.`,
       data: { event: "member_approved", member_no: memberNo },
     });
 
@@ -215,22 +215,27 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
       const year = query.year ?? new Date().getFullYear();
 
       const [profile, contributions, loans, transactions] = await Promise.all([
-        supabase.from("profiles")
+        supabase
+          .from("profiles")
           .select("id, full_name, member_no, phone, address, status, created_at")
-          .eq("id", params.id).single(),
+          .eq("id", params.id)
+          .single(),
 
-        supabase.from("contributions")
+        supabase
+          .from("contributions")
           .select("*")
           .eq("member_id", params.id)
           .eq("year", year)
           .order("month", { ascending: true }),
 
-        supabase.from("loans")
+        supabase
+          .from("loans")
           .select("*")
           .eq("member_id", params.id)
           .order("created_at", { ascending: false }),
 
-        supabase.from("transactions")
+        supabase
+          .from("transactions")
           .select("*")
           .eq("member_id", params.id)
           .order("created_at", { ascending: false }),
@@ -238,13 +243,13 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
 
       if (!profile.data) throw new Error("Member not found");
 
-      const totalContributions = contributions.data
-        ?.filter((c) => c.payment_status === "success")
-        .reduce((s, c) => s + Number(c.amount), 0) ?? 0;
+      const totalContributions =
+        contributions.data
+          ?.filter((c) => c.payment_status === "success")
+          .reduce((s, c) => s + Number(c.amount), 0) ?? 0;
 
-      const activeLoans = loans.data?.filter((l) =>
-        ["disbursed", "repaying"].includes(l.status)
-      ) ?? [];
+      const activeLoans =
+        loans.data?.filter((l) => ["disbursed", "repaying"].includes(l.status)) ?? [];
 
       return {
         year,
@@ -265,5 +270,5 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
         },
       };
     },
-    { query: t.Partial(t.Object({ year: t.Numeric() })) }
+    { query: t.Partial(t.Object({ year: t.Numeric() })) },
   );

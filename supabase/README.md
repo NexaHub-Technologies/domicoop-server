@@ -1,6 +1,6 @@
 # Supabase Configuration
 
-This directory contains database migrations and configuration for the DOMICOP Supabase project.
+This directory contains database migrations and configuration for the DOMICOOP Supabase project.
 
 ## Database Migrations
 

@@ -1,13 +1,13 @@
-# DOMICOP API Server
+# DOMICOOP API Server
 
-> **Elysia on Bun — Backend API Server for DOMICOP Co-operative Society Platform**
+> **Elysia on Bun — Backend API Server for DOMICOOP (Dominion Co-operative Society) Platform**
 
 [![Bun](https://img.shields.io/badge/Bun-1.3+-black?style=flat&logo=bun)](https://bun.sh)
 [![Elysia](https://img.shields.io/badge/Elysia-1.4+-black?style=flat)](https://elysiajs.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-blue?style=flat&logo=typescript)](https://typescriptlang.org)
 [![Supabase](https://img.shields.io/badge/Supabase-2.0+-3ECF8E?style=flat&logo=supabase)](https://supabase.com)
 
-A high-performance backend API server built with [Elysia](https://elysiajs.com) on [Bun](https://bun.sh) for the DOMICOP co-operative society platform. This server serves as the single point of communication between all clients (Expo mobile app and Next.js admin portal) and all data services (Supabase and Paystack).
+A high-performance backend API server built with [Elysia](https://elysiajs.com) on [Bun](https://bun.sh) for the DOMICOOP (Dominion Cooperative society platform). This server serves as the single point of communication between all clients (Expo mobile app and Next.js admin portal) and all data services (Supabase and Paystack).
 
 ## Table of Contents
 
@@ -654,7 +654,7 @@ bun test
 
 ## Support
 
-For support, email support@domicop.com or open an issue on GitHub.
+For support, email nexahubt@gmail.com or open an issue on GitHub.
 
 ---
 

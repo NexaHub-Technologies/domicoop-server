@@ -1,6 +1,6 @@
 -- Migration: Initial Database Schema
 -- Created: 2024-06-15
--- Description: Creates all tables for DOMICOP application
+-- Description: Creates all tables for DOMICOOP application
 
 -- ============================================================================
 -- 1. PROFILES TABLE
@@ -349,7 +349,7 @@ CREATE POLICY "Users can view message replies"
   USING (
     EXISTS (
       SELECT 1 FROM public.messages m
-      WHERE m.id = message_replies.message_id 
+      WHERE m.id = message_replies.message_id
       AND m.member_id = auth.uid()
     )
   );
@@ -449,11 +449,11 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO public.profiles (
-    id, 
-    full_name, 
-    status, 
-    role, 
-    onboarding_step, 
+    id,
+    full_name,
+    status,
+    role,
+    onboarding_step,
     onboarding_done
   )
   VALUES (
@@ -469,7 +469,7 @@ BEGIN
     false
   )
   ON CONFLICT (id) DO NOTHING;
-  
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -479,7 +479,7 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW 
+  FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
 -- ============================================================================
@@ -492,29 +492,29 @@ DECLARE
   next_number INTEGER;
   member_number TEXT;
 BEGIN
-  IF NEW.status = 'active' AND NEW.member_no IS NULL AND 
+  IF NEW.status = 'active' AND NEW.member_no IS NULL AND
      (OLD.status IS DISTINCT FROM NEW.status) THEN
-    
+
     SELECT COALESCE(MAX(
       CAST(NULLIF(regexp_replace(member_no, '[^0-9]', '', 'g'), '') AS INTEGER)
     ), 0) + 1
     INTO next_number
     FROM public.profiles
     WHERE status = 'active' AND member_no IS NOT NULL;
-    
-    member_number := 'DOMICOP-' || LPAD(next_number::TEXT, 4, '0');
-    
+
+    member_number := 'DOMICOOP-' || LPAD(next_number::TEXT, 4, '0');
+
     WHILE EXISTS (
-      SELECT 1 FROM public.profiles 
+      SELECT 1 FROM public.profiles
       WHERE member_no = member_number AND id != NEW.id
     ) LOOP
       next_number := next_number + 1;
-      member_number := 'DOMICOP-' || LPAD(next_number::TEXT, 4, '0');
+      member_number := 'DOMICOOP-' || LPAD(next_number::TEXT, 4, '0');
     END LOOP;
-    
+
     NEW.member_no := member_number;
   END IF;
-  
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -548,7 +548,7 @@ BEGIN
       )
     );
   END IF;
-  
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

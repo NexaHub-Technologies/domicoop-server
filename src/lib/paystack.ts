@@ -402,7 +402,7 @@ async function paystackRequest<T>(path: string, options: RequestInit = {}): Prom
 /**
  * Paystack API Client
  *
- * Typed methods for all Paystack operations used in DOMICOP:
+ * Typed methods for all Paystack operations used in DOMICOOP:
  * - Payment transactions (collection)
  * - Bank listing and account verification
  * - Transfer recipients and disbursements

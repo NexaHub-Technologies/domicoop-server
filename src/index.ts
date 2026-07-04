@@ -15,11 +15,11 @@ const app = new Elysia()
     }),
   )
   .use(logger({ level: "info" }))
-  .use(swagger({ documentation: { info: { title: "DOMICOP API", version: "2.0.0" } } }))
+  .use(swagger({ documentation: { info: { title: "DOMICOOP API", version: "2.0.0" } } }))
 
   // Root route - API info
   .get("/", () => ({
-    name: "DOMICOP API",
+    name: "DOMICOOP API",
     version: "2.0.0",
     status: "running",
     documentation: "/swagger",
@@ -60,5 +60,5 @@ if (app.server) {
   NotificationService.getInstance().setServer(app.server);
 }
 
-console.log(`✓ DOMICOP API running on http://localhost:${app.server?.port}`);
+console.log(`✓ DOMICOOP API running on http://localhost:${app.server?.port}`);
 export type App = typeof app;

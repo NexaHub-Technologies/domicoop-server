@@ -7,7 +7,7 @@ import { NotificationService } from "@/services/notificationService";
 /**
  * Authentication Routes
  *
- * Handles all authentication-related endpoints for the DOMICOP platform.
+ * Handles all authentication-related endpoints for the DOMICOOP platform.
  * Both admin and member users use the same authentication flow.
  * Role-based access control is enforced via middleware and RLS policies.
  *

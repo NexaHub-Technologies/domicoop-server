@@ -6,4 +6,4 @@ healthcheckPath = "/health"
 healthcheckTimeout = 300
 
 [[services]]
-name = "domicop-api"
+name = "domicoop-api"
