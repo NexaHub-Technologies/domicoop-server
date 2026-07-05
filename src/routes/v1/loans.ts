@@ -31,15 +31,28 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
   .use(requireActive)
   .post(
     "/apply",
-    async ({ userId, body }) => {
+    async ({ userId, body, set }) => {
       const { count } = await supabase
         .from("contributions")
         .select("*", { count: "exact", head: true })
         .eq("member_id", userId!)
         .eq("payment_status", "success");
 
-      if ((count ?? 0) < 3)
-        throw new Error("Minimum 3 verified contributions required to apply");
+      const verifiedCount = count ?? 0;
+      const requiredCount = 3;
+
+      if (verifiedCount < requiredCount) {
+        set.status = 403;
+        return {
+          success: false,
+          reason: "insufficient_contributions",
+          eligibility: {
+            verified_count: verifiedCount,
+            required_count: requiredCount,
+            short_by: requiredCount - verifiedCount,
+          },
+        };
+      }
 
       const { data: existing } = await supabase
         .from("loans")
@@ -48,7 +61,14 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         .in("status", ["pending", "under_review", "approved", "disbursed", "repaying"])
         .maybeSingle();
 
-      if (existing) throw new Error("You already have an active loan");
+      if (existing) {
+        set.status = 409;
+        return {
+          success: false,
+          reason: "active_loan_exists",
+          active_loan_id: existing.id,
+        };
+      }
 
       const { data, error } = await supabase
         .from("loans")
