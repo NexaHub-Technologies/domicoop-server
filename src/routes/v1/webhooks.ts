@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase";
 import type { PaystackTransferEvent } from "@/lib/paystack";
 import { NotificationService } from "@/services/notificationService";
 import { writeAuditLog } from "@/utils/audit";
-import { allocateContribution } from "@/services/contributionAllocation";
+import { allocateContribution, MIN_CONTRIBUTION } from "@/services/contributionAllocation";
 
 export const webhookRoutes = new Elysia({ prefix: "/webhooks" })
   .post(
@@ -97,6 +97,16 @@ async function handleChargeSuccess(data: PaystackChargeEventData): Promise<void>
   }
   if (contribution.payment_status === "success") return;
 
+  const amountNaira = data.amount / 100;
+  // Below-minimum payments cannot form a valid allocation (see mds/allocation.md).
+  // Skip rather than corrupt data or trigger Paystack webhook retries.
+  if (amountNaira < MIN_CONTRIBUTION) {
+    console.error(
+      `[Paystack Webhook] charge.success ${reference} amount ₦${amountNaira} below minimum ₦${MIN_CONTRIBUTION}; skipping`,
+    );
+    return;
+  }
+
   // Idempotency gate: unique paystack_ref; a concurrent /verify wins and this no-ops
   const { error: txError } = await supabase.from("transactions").insert({
     paystack_ref: reference,
@@ -119,14 +129,13 @@ async function handleChargeSuccess(data: PaystackChargeEventData): Promise<void>
     return;
   }
 
-  const amountNaira = data.amount / 100;
   const allocation = allocateContribution(amountNaira);
 
   const { error: updateError } = await supabase
     .from("contributions")
     .update({
       payment_status: "success",
-      amount: data.amount,
+      amount: amountNaira,
       shares: allocation.shares,
       social: allocation.social,
       savings: allocation.savings,
@@ -155,7 +164,7 @@ async function handleChargeSuccess(data: PaystackChargeEventData): Promise<void>
     action: "contribution_verified",
     entity: "contributions",
     entity_id: contribution.id,
-    metadata: { paystack_ref: reference, amount: data.amount, channel: data.channel },
+    metadata: { paystack_ref: reference, amount: amountNaira, channel: data.channel },
   });
 
   console.log(`[Paystack Webhook] Contribution ${contribution.id} confirmed via charge.success`);

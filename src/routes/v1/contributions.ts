@@ -4,7 +4,7 @@ import { requireAdmin } from "@/middleware/requireAdmin";
 import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
 import { paginate } from "@/utils/validators";
-import { allocateContribution } from "@/services/contributionAllocation";
+import { allocateContribution, MIN_CONTRIBUTION } from "@/services/contributionAllocation";
 import { NotificationService } from "@/services/notificationService";
 import { paystack } from "@/lib/paystack";
 import type { Database } from "@/types/database";
@@ -123,7 +123,9 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         body.payment_status = "pending";
       }
       const isSuccess = body.payment_status === "success";
-      const storedAmount = isSuccess ? body.amount * 100 : body.amount;
+      // amount is stored in Naira across all payment_status values; the manual
+      // path already receives Naira in body.amount.
+      const storedAmount = body.amount;
       const allocation = isSuccess ? allocateContribution(body.amount) : null;
 
       const { data, error } = await supabase
@@ -164,7 +166,7 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
     },
     {
       body: t.Object({
-        amount: t.Number({ minimum: 1 }),
+        amount: t.Number({ minimum: MIN_CONTRIBUTION }),
         year: t.Number(),
         month: t.String({ pattern: "^[0-9]{4}-[0-9]{2}$" }),
         transaction_ref: t.Optional(t.String()),
@@ -223,6 +225,19 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         return { verified: false, reason: "unsupported_currency", currency: tx.currency };
       }
 
+      const amountNaira = tx.amount / 100;
+      // Reject below-minimum payments before any DB write so we neither orphan a
+      // transaction row nor build a broken allocation (see mds/allocation.md).
+      if (amountNaira < MIN_CONTRIBUTION) {
+        set.status = 422;
+        return {
+          verified: false,
+          reason: "below_minimum",
+          minimum: MIN_CONTRIBUTION,
+          amount: amountNaira,
+        };
+      }
+
       // Race-safe idempotency gate: transactions.paystack_ref is UNIQUE, so a
       // concurrent/replayed verify loses here and returns the existing record.
       const { error: txError } = await supabase.from("transactions").insert({
@@ -250,14 +265,13 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         throw new Error(`Failed to record transaction: ${txError.message}`);
       }
 
-      const amountNaira = tx.amount / 100;
       const allocation = allocateContribution(amountNaira);
 
       const { data: contribution, error } = await supabase
         .from("contributions")
         .insert({
           member_id: userId,
-          amount: tx.amount,
+          amount: amountNaira,
           shares: allocation.shares,
           social: allocation.social,
           savings: allocation.savings,
@@ -285,7 +299,7 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
         action: "contribution_verified",
         entity: "contributions",
         entity_id: contribution.id,
-        metadata: { paystack_ref: reference, amount: tx.amount, channel: tx.channel },
+        metadata: { paystack_ref: reference, amount: amountNaira, channel: tx.channel },
       });
 
       await notificationService.notify({
@@ -376,7 +390,7 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
       if (!current) throw new Error("Contribution not found");
 
       const allocation = isSuccess
-        ? allocateContribution(Number(current.amount) / 100)
+        ? allocateContribution(Number(current.amount))
         : null;
 
       const { data, error } = await supabase
@@ -402,7 +416,7 @@ export const contributionRoutes = new Elysia({ prefix: "/contributions" })
 
       // Tell the member the outcome of the status review (skip pending)
       if (body.status !== "pending") {
-        const amountNaira = Number(data.amount) / 100;
+        const amountNaira = Number(data.amount);
         await notificationService.notify({
           userIds: [data.member_id],
           type: "contribution",
