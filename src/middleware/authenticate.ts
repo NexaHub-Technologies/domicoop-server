@@ -22,10 +22,23 @@ const PUBLIC_PATHS = [
   "/ws/notifications",
 ];
 
+// Paths that are only public for GET — the same path also serves
+// admin-only writes (e.g. POST /announcements creates one), so these need
+// an exact + method match rather than a startsWith prefix.
+const PUBLIC_GET_PATHS = ["/v1/announcements", "/announcements"];
+
 export const authenticate = new Elysia({ name: "authenticate" }).derive(
   { as: "global" },
-  async ({ headers, set, path }) => {
+  async ({ headers, set, path, request }) => {
     if (PUBLIC_PATHS.some((p) => path.startsWith(p))) {
+      return;
+    }
+    // path can arrive with or without a trailing slash depending on how the
+    // client requested it, so compare both forms.
+    if (
+      request.method === "GET" &&
+      PUBLIC_GET_PATHS.some((p) => path === p || path === `${p}/`)
+    ) {
       return;
     }
 
