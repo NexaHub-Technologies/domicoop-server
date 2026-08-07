@@ -99,7 +99,7 @@ async function handleChargeSuccess(data: PaystackChargeEventData): Promise<void>
   if (contribution.payment_status === "success") return;
 
   const amountNaira = data.amount / 100;
-  // Below-minimum payments cannot form a valid allocation (see mds/allocation.md).
+  // Below-minimum payments are rejected outright (see docs/currency-contract.md).
   // Skip rather than corrupt data or trigger Paystack webhook retries.
   if (amountNaira < MIN_CONTRIBUTION) {
     console.error(

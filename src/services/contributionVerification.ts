@@ -74,7 +74,7 @@ export async function verifyContributionPayment(
 
   const amountNaira = tx.amount / 100;
   // Reject below-minimum payments before any DB write so we neither orphan a
-  // transaction row nor build a broken allocation (see mds/allocation.md).
+  // transaction row nor build a broken allocation (see docs/currency-contract.md).
   if (amountNaira < MIN_CONTRIBUTION) {
     return { result: VerificationResult.BelowMinimum, amount: amountNaira };
   }
