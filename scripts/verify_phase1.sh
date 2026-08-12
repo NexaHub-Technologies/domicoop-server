@@ -34,21 +34,44 @@ check() { # description, expected_code, actual_code, extra
 
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
+# An RPC is "denied" if it did not execute. Asserting one specific status is
+# wrong, which the first production run of this script demonstrated: PostgREST
+# answers an anon privilege failure with 401, not 403, and answers a function
+# it cannot resolve for that role with 404 — and which of the two you get
+# depends on the arguments sent.
+#
+# So assert on the error code in the body as well as a non-200 status. 42501 is
+# a privilege denial; PGRST202 is the function not being visible to this role.
+# Either proves the revoke landed. A bare status check would also go green if
+# someone simply deleted the function, which is not the same thing.
+check_denied() { # description, url, json-body
+  local desc="$1" url="$2" body="$3" out status kind
+  out=$(curl -s -w '\n%{http_code}' -X POST "$url" \
+        -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+        -H 'Content-Type: application/json' -d "$body")
+  status=$(printf '%s' "$out" | tail -n1)
+  kind=$(printf '%s' "$out" | sed '$d' | grep -o '"code":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+  if [ "$status" != "200" ] && { [ "$kind" = "42501" ] || [ "$kind" = "PGRST202" ]; }; then
+    printf '  \033[32mPASS\033[0m  %-52s %s %s\n' "$desc" "$status" "$kind"
+    pass=$((pass + 1))
+  else
+    printf '  \033[31mFAIL\033[0m  %-52s status=%s code=%s\n' "$desc" "$status" "${kind:-none}"
+    fail=$((fail + 1))
+  fi
+}
+
 echo
 echo "Anon-key probes  (§5 — the RPCs must no longer be reachable)"
 
-# cleanup_old_notifications DELETEs rows. A 403 proves the revoke landed and
-# the function body never executed. Do not "fix" this test by expecting 200.
-check "rpc/cleanup_old_notifications rejected" 403 "$(code -X POST \
-  "$U/rest/v1/rpc/cleanup_old_notifications" \
-  -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
-  -H 'Content-Type: application/json' -d '{}')"
+# cleanup_old_notifications DELETEs rows, so a denial here means the function
+# body never ran. Do not "fix" this test by expecting 200.
+check_denied "rpc/cleanup_old_notifications rejected" \
+  "$U/rest/v1/rpc/cleanup_old_notifications" '{}'
 
-check "rpc/unread_notification_counts rejected" 403 "$(code -X POST \
+check_denied "rpc/unread_notification_counts rejected" \
   "$U/rest/v1/rpc/unread_notification_counts" \
-  -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
-  -H 'Content-Type: application/json' \
-  -d '{"user_ids":["00000000-0000-0000-0000-000000000000"]}')"
+  '{"user_ids":["00000000-0000-0000-0000-000000000000"]}'
 
 # is_admin stays executable on purpose — anon evaluates it inside the
 # announcements policy. If this starts returning 403, public announcements
