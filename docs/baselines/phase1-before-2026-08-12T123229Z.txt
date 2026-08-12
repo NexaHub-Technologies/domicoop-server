@@ -1,0 +1,24 @@
+Phase 1 verification baseline — BEFORE the hardening migration
+captured: 2026-08-12T12:32:29Z
+project:  uqcododmopsgaeuuhrlm
+commit:   5c33813
+note:     cleanup_old_notifications executes while unfixed; verified
+          immediately beforehand that 0 rows predate its 60-day cutoff,
+          so the call is a no-op. It is expected to return 200 here —
+          that IS the finding.
+
+
+Anon-key probes  (§5 — the RPCs must no longer be reachable)
+  [31mFAIL[0m  rpc/cleanup_old_notifications rejected               got 200, want 403 
+  [31mFAIL[0m  rpc/unread_notification_counts rejected              got 200, want 403 
+  [32mPASS[0m  rpc/is_admin still executable (intentional)          200
+  [32mPASS[0m  anon can still read published announcements          200
+
+Signup metadata  (§1 — account_type in user_metadata must be ignored)
+  SKIP  requires creating a throwaway auth user; run manually:
+        sign up with options.data.account_type='admin', then confirm the
+        new id lands in profiles and NOT in admin_profiles.
+
+Member-JWT probes  SKIPPED  (set MEMBER_JWT to run)
+
+  2 passed, 2 failed

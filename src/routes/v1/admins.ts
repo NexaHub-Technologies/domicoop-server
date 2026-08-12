@@ -40,6 +40,11 @@ export const adminRoutes = new Elysia({ prefix: "/admins" })
         user_metadata: {
           full_name: body.full_name,
           phone: body.phone,
+        },
+        // account_type lives in app_metadata, which GoTrue only accepts from
+        // the admin API. handle_new_user() reads it from there so a public
+        // signup can't mint an admin (migration 20260811000001).
+        app_metadata: {
           account_type: "admin",
         },
       });
