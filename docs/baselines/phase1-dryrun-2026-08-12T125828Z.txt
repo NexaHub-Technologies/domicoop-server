@@ -1,0 +1,30 @@
+Phase 1 dry run — local throwaway Postgres, NOT production
+captured: 2026-08-12T12:58:28Z
+image:    public.ecr.aws/supabase/postgres:15.8.1.085
+method:   all 18 migrations applied in order from an empty database
+
+MIGRATION APPLICATION
+  18/18 applied cleanly, including 20260811000001_phase1_harden_authorization
+  re-applying the phase 1 file is a no-op (written idempotently) — verified
+
+BEHAVIOUR
+  [PASS] cleanup_old_notifications   anon=f authenticated=f service_role=t
+  [PASS] unread_notification_counts  anon=f authenticated=f service_role=t
+  [PASS] is_admin                    still executable (required by the
+         announcements policy, which anon evaluates)
+  [PASS] search_path pinned on all 7 SECURITY DEFINER functions
+  [PASS] signup with account_type in user_metadata -> member, NOT admin
+  [PASS] signup with account_type in app_metadata  -> admin, not member
+  [PASS] member self-approve pending->active  -> blocked, 42501
+  [PASS] member edits own full_name            -> allowed, 1 row
+
+NOTES ON THE HARNESS
+  This image's auth.uid() reads only the legacy request.jwt.claim.sub GUC.
+  Tests must set it, or RLS matches zero rows and a blocked write is
+  indistinguishable from a write that hit nothing. Hosted Supabase ships the
+  coalescing version and is unaffected.
+
+  Two earlier readings in this session were harness artifacts, not defects:
+  a SET LOCAL outside a transaction ran as postgres (bypassing RLS and the
+  guard) and committed a status change, after which every later self-approve
+  test was active->active and correctly not blocked.
