@@ -30,7 +30,11 @@ async function createAdmin() {
     email,
     password,
     email_confirm: true,
-    user_metadata: { full_name: fullName, phone, account_type: "admin" },
+    user_metadata: { full_name: fullName, phone },
+    // account_type must be in app_metadata — GoTrue only accepts it from the
+    // admin API, so a public signup can't mint an admin. See migration
+    // 20260811000001.
+    app_metadata: { account_type: "admin" },
   });
 
   if (error) {

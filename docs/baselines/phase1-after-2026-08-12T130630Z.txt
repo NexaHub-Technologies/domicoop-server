@@ -1,0 +1,20 @@
+Phase 1 verification — AFTER the hardening migration
+captured: 2026-08-12T13:06:30Z
+project:  uqcododmopsgaeuuhrlm
+branch:   fix/phase1-harden-authorization @ e8f579b
+
+
+Anon-key probes  (§5 — the RPCs must no longer be reachable)
+  [31mFAIL[0m  rpc/cleanup_old_notifications rejected               got 401, want 403 
+  [31mFAIL[0m  rpc/unread_notification_counts rejected              got 401, want 403 
+  [32mPASS[0m  rpc/is_admin still executable (intentional)          200
+  [32mPASS[0m  anon can still read published announcements          200
+
+Signup metadata  (§1 — account_type in user_metadata must be ignored)
+  SKIP  requires creating a throwaway auth user; run manually:
+        sign up with options.data.account_type='admin', then confirm the
+        new id lands in profiles and NOT in admin_profiles.
+
+Member-JWT probes  SKIPPED  (set MEMBER_JWT to run)
+
+  2 passed, 2 failed
