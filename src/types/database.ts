@@ -36,6 +36,7 @@ export type Database = {
     Tables: {
       admin_profiles: {
         Row: {
+          officer_role: string | null
           avatar_url: string | null
           created_at: string
           email: string | null
@@ -46,6 +47,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          officer_role?: string | null
           avatar_url?: string | null
           created_at?: string
           email?: string | null
@@ -56,6 +58,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          officer_role?: string | null
           avatar_url?: string | null
           created_at?: string
           email?: string | null
@@ -249,8 +252,169 @@ export type Database = {
           },
         ]
       }
+      loan_approvals: {
+        Row: {
+          action: string
+          amount_approved: number | null
+          created_at: string
+          id: string
+          interest_rate: number | null
+          loan_id: string
+          officer_id: string
+          officer_role: string
+          signature_url: string | null
+          signed_at: string
+          tenure_months: number | null
+        }
+        Insert: {
+          action: string
+          amount_approved?: number | null
+          created_at?: string
+          id?: string
+          interest_rate?: number | null
+          loan_id: string
+          officer_id: string
+          officer_role: string
+          signature_url?: string | null
+          signed_at?: string
+          tenure_months?: number | null
+        }
+        Update: {
+          action?: string
+          amount_approved?: number | null
+          created_at?: string
+          id?: string
+          interest_rate?: number | null
+          loan_id?: string
+          officer_id?: string
+          officer_role?: string
+          signature_url?: string | null
+          signed_at?: string
+          tenure_months?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loan_approvals_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "loan_approvals_officer_id_fkey"
+            columns: ["officer_id"]
+            isOneToOne: false
+            referencedRelation: "admin_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      loan_guarantors: {
+        Row: {
+          bank_account: string
+          bank_name: string
+          created_at: string
+          full_name: string
+          id: string
+          loan_id: string
+          phone: string
+          position: number
+          signature_url: string | null
+          signed_at: string | null
+        }
+        Insert: {
+          bank_account: string
+          bank_name: string
+          created_at?: string
+          full_name: string
+          id?: string
+          loan_id: string
+          phone: string
+          position: number
+          signature_url?: string | null
+          signed_at?: string | null
+        }
+        Update: {
+          bank_account?: string
+          bank_name?: string
+          created_at?: string
+          full_name?: string
+          id?: string
+          loan_id?: string
+          phone?: string
+          position?: number
+          signature_url?: string | null
+          signed_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loan_guarantors_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      loan_installments: {
+        Row: {
+          amount: number
+          created_at: string
+          due_on: string
+          id: string
+          installment_no: number
+          loan_id: string
+          paid_amount: number
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          due_on: string
+          id?: string
+          installment_no: number
+          loan_id: string
+          paid_amount?: number
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          due_on?: string
+          id?: string
+          installment_no?: number
+          loan_id?: string
+          paid_amount?: number
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loan_installments_loan_id_fkey"
+            columns: ["loan_id"]
+            isOneToOne: false
+            referencedRelation: "loans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       loans: {
         Row: {
+          amount_in_words: string | null
+          applicant_address: string | null
+          applicant_bank_account: string | null
+          applicant_bank_name: string | null
+          applicant_phone: string | null
+          approved_at: string | null
+          bond_cancelled_at: string | null
+          bond_signature_url: string | null
+          bond_signed_at: string | null
+          bond_url: string | null
+          borrower_signature_url: string | null
+          first_installment_on: string | null
+          grace_months: number
           admin_notes: string | null
           amount_approved: number | null
           amount_requested: number
@@ -271,6 +435,19 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          amount_in_words?: string | null
+          applicant_address?: string | null
+          applicant_bank_account?: string | null
+          applicant_bank_name?: string | null
+          applicant_phone?: string | null
+          approved_at?: string | null
+          bond_cancelled_at?: string | null
+          bond_signature_url?: string | null
+          bond_signed_at?: string | null
+          bond_url?: string | null
+          borrower_signature_url?: string | null
+          first_installment_on?: string | null
+          grace_months?: number
           admin_notes?: string | null
           amount_approved?: number | null
           amount_requested: number
@@ -291,6 +468,19 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          amount_in_words?: string | null
+          applicant_address?: string | null
+          applicant_bank_account?: string | null
+          applicant_bank_name?: string | null
+          applicant_phone?: string | null
+          approved_at?: string | null
+          bond_cancelled_at?: string | null
+          bond_signature_url?: string | null
+          bond_signed_at?: string | null
+          bond_url?: string | null
+          borrower_signature_url?: string | null
+          first_installment_on?: string | null
+          grace_months?: number
           admin_notes?: string | null
           amount_approved?: number | null
           amount_requested?: number
@@ -613,17 +803,31 @@ export type Database = {
           bank_code: string | null
           bank_name: string | null
           created_at: string
+          date_of_birth: string | null
           email: string | null
           expo_push_token: string | null
           full_name: string
           id: string
+          id_card_number: string | null
+          marital_status: string | null
           member_no: string | null
+          monthly_subscription: number | null
           next_of_kin: string | null
           phone: string | null
+          place_of_work: string | null
           push_notifications_enabled: boolean | null
+          referred_by: string | null
+          registration_fee_paid: boolean
+          registration_paid_at: string | null
+          registration_ref: string | null
+          registration_window_id: string | null
           role: string
+          sex: string | null
+          signature_url: string | null
           status: string
+          type_of_business: string | null
           updated_at: string
+          whatsapp_number: string | null
         }
         Insert: {
           address?: string | null
@@ -632,17 +836,31 @@ export type Database = {
           bank_code?: string | null
           bank_name?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string | null
           expo_push_token?: string | null
           full_name: string
           id: string
+          id_card_number?: string | null
+          marital_status?: string | null
           member_no?: string | null
+          monthly_subscription?: number | null
           next_of_kin?: string | null
           phone?: string | null
+          place_of_work?: string | null
           push_notifications_enabled?: boolean | null
+          referred_by?: string | null
+          registration_fee_paid?: boolean
+          registration_paid_at?: string | null
+          registration_ref?: string | null
+          registration_window_id?: string | null
           role?: string
+          sex?: string | null
+          signature_url?: string | null
           status?: string
+          type_of_business?: string | null
           updated_at?: string
+          whatsapp_number?: string | null
         }
         Update: {
           address?: string | null
@@ -651,19 +869,100 @@ export type Database = {
           bank_code?: string | null
           bank_name?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string | null
           expo_push_token?: string | null
           full_name?: string
           id?: string
+          id_card_number?: string | null
+          marital_status?: string | null
           member_no?: string | null
+          monthly_subscription?: number | null
           next_of_kin?: string | null
           phone?: string | null
+          place_of_work?: string | null
           push_notifications_enabled?: boolean | null
+          referred_by?: string | null
+          registration_fee_paid?: boolean
+          registration_paid_at?: string | null
+          registration_ref?: string | null
+          registration_window_id?: string | null
           role?: string
+          sex?: string | null
+          signature_url?: string | null
           status?: string
+          type_of_business?: string | null
+          updated_at?: string
+          whatsapp_number?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_registration_window_id_fkey"
+            columns: ["registration_window_id"]
+            isOneToOne: false
+            referencedRelation: "registration_windows"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      registration_windows: {
+        Row: {
+          applications_count: number
+          capacity: number | null
+          closes_at: string
+          created_at: string
+          created_by: string | null
+          id: string
+          max_monthly_subscription: number
+          min_monthly_subscription: number
+          name: string
+          opens_at: string
+          registration_fee: number
+          social_fee: number
+          state: string
+          updated_at: string
+        }
+        Insert: {
+          applications_count?: number
+          capacity?: number | null
+          closes_at: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          max_monthly_subscription?: number
+          min_monthly_subscription?: number
+          name: string
+          opens_at: string
+          registration_fee?: number
+          social_fee?: number
+          state?: string
           updated_at?: string
         }
-        Relationships: []
+        Update: {
+          applications_count?: number
+          capacity?: number | null
+          closes_at?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          max_monthly_subscription?: number
+          min_monthly_subscription?: number
+          name?: string
+          opens_at?: string
+          registration_fee?: number
+          social_fee?: number
+          state?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "registration_windows_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "admin_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       transactions: {
         Row: {

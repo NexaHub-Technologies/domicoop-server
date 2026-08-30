@@ -22,7 +22,9 @@ export const adminRoutes = new Elysia({ prefix: "/admins" })
   .get("/", async () => {
     const { data, error } = await supabase
       .from("admin_profiles")
-      .select("id, full_name, email, phone, avatar_url, is_super_admin, created_at")
+      .select(
+        "id, full_name, email, phone, avatar_url, is_super_admin, officer_role, created_at",
+      )
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data;
@@ -87,6 +89,67 @@ export const adminRoutes = new Elysia({ prefix: "/admins" })
 
   // Revoke an admin — deletes the auth user, which cascades the admin_profiles
   // row. Guards against removing yourself.
+  /**
+   * Assign or clear a cooperative office
+   *
+   * The Secretary and the President are the two signatures on Part C of a loan
+   * application and on the bond. Holding an office is separate from being an
+   * admin: it is what lets someone commit the cooperative to lending money.
+   *
+   * At most one person may hold each office (a partial unique index enforces
+   * it), so handing the office to someone new means clearing the incumbent
+   * first — deliberate friction for a change of officers.
+   *
+   * NOTE: this is gated on `requireAdmin`, not on `is_super_admin`. That column
+   * exists but nothing in the codebase ever sets it, so gating on it would ship
+   * an office nobody could ever assign. Tighten this the moment super-admin
+   * provisioning is real.
+   *
+   * @route PATCH /admins/:id/office
+   * @group Admins
+   * @returns {Error} 409 - The office is already held by someone else
+   */
+  .patch(
+    "/:id/office",
+    async ({ params, body, userId, set }) => {
+      const { data, error } = await supabase
+        .from("admin_profiles")
+        .update({ officer_role: body.officer_role })
+        .eq("id", params.id)
+        .select(
+          "id, full_name, email, phone, avatar_url, is_super_admin, officer_role, created_at",
+        )
+        .single();
+
+      if (error) {
+        if (error.code === "23505") {
+          set.status = 409;
+          return {
+            error: `The ${body.officer_role} office is already held. Clear it from the current holder first.`,
+            reason: "office_taken",
+          };
+        }
+        throw new Error(error.message);
+      }
+
+      await writeAuditLog({
+        actor_id: userId!,
+        action: body.officer_role ? "assign_officer_role" : "clear_officer_role",
+        entity: "admin_profiles",
+        entity_id: params.id,
+        metadata: { officer_role: body.officer_role },
+      });
+
+      return data;
+    },
+    {
+      params: uuidParam,
+      body: t.Object({
+        officer_role: t.Union([t.Literal("secretary"), t.Literal("president"), t.Null()]),
+      }),
+    },
+  )
+
   .delete(
     "/:id",
     async ({ params, userId, set }) => {

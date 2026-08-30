@@ -3,6 +3,10 @@ import { supabaseAuth, supabase } from "@/lib/supabase";
 import { authenticate } from "@/middleware/authenticate";
 import { authRateLimit } from "@/middleware/rateLimiter";
 import { NotificationService } from "@/services/notificationService";
+import {
+  assertRegistrationOpen,
+  RegistrationClosedError,
+} from "@/services/registrationWindow";
 
 /**
  * Authentication Routes
@@ -125,6 +129,15 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   /**
    * Register new account
    *
+   * @deprecated Superseded by `POST /v1/registration/apply`, which collects the
+   * full MEM membership form and requires the registration and social fees to
+   * be paid and verified before an account exists. This route is kept only for
+   * app builds already in the field, and creates a member with
+   * `registration_fee_paid = false` so admins can see who still owes.
+   *
+   * It is now gated on the same registration window as the new route: an
+   * always-open back door would defeat the point of a time-boxed intake.
+   *
    * Creates a new user account with email, password, and complete profile information.
    * All profile fields are collected in a single registration call.
    * Sends verification email if email confirmation is enabled.
@@ -147,6 +160,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
    * @returns {string} 200.user_id - Created user UUID
    * @returns {string} 200.email - User email
    * @returns {Error} 400 - Validation error or email already exists
+   * @returns {Error} 403 - Registration is not currently open (body carries `reason`)
    *
    * @example
    * ```typescript
@@ -176,6 +190,16 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   .post(
     "/register",
     async ({ body, set }) => {
+      try {
+        await assertRegistrationOpen();
+      } catch (err) {
+        if (err instanceof RegistrationClosedError) {
+          set.status = 403;
+          return { error: err.message, reason: err.reason };
+        }
+        throw err;
+      }
+
       const { data, error } = await supabaseAuth.auth.signUp({
         email: body.email,
         password: body.password,

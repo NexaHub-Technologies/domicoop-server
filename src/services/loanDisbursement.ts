@@ -173,11 +173,25 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
 }
 
 async function sendApprovalNotification(loan: LoanWithProfile): Promise<void> {
+  // amount_approved / monthly_repayment / tenure_months are declared non-null
+  // on LoanWithProfile but nullable in the database, and the caller reaches
+  // this through an `as unknown as` cast that launders the difference away.
+  // A bare `.toLocaleString()` on a null therefore throws — which is how an
+  // approval notification used to fail silently. Route decisions now reject an
+  // approval without terms, so this should be unreachable; degrade rather than
+  // throw if it ever is, because a vaguer message beats no message at all.
+  const hasTerms =
+    loan.amount_approved != null &&
+    loan.monthly_repayment != null &&
+    loan.tenure_months != null;
+
   await NotificationService.getInstance().notify({
     userIds: [loan.member_id],
     type: "loan",
     title: "Loan Approved",
-    body: `Your loan of ₦${loan.amount_approved.toLocaleString()} has been approved! Monthly repayment: ₦${loan.monthly_repayment.toLocaleString()} for ${loan.tenure_months} months.`,
+    body: hasTerms
+      ? `Your loan of ₦${loan.amount_approved.toLocaleString()} has been approved! Monthly repayment: ₦${loan.monthly_repayment.toLocaleString()} for ${loan.tenure_months} months.`
+      : "Your loan application has been approved. Open the app to see your repayment terms.",
     data: {
       event: "loan_approved",
       loan_id: loan.id,

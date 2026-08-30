@@ -107,6 +107,38 @@ export async function processLoanRepayment(
     throw new Error(`Failed to update loan: ${updateError.message}`);
   }
 
+  // Settle the schedule the borrower signed on Part A item 8. Applied oldest
+  // first: a payment clears the earliest outstanding installment, which is what
+  // "equal installments commencing [month]" means on the bond.
+  //
+  // Best-effort — the money is already recorded against the loan balance, which
+  // is what governs closure. A schedule that drifts is a reporting problem, not
+  // a financial one, so it is logged rather than allowed to fail a repayment.
+  try {
+    await applyToSchedule(loanId, amount);
+  } catch (err) {
+    console.error(`[Repayment] Could not update the schedule for loan ${loanId}:`, err);
+  }
+
+  if (newStatus === "closed") {
+    // The bond is cancelled by the Secretary and the President, not
+    // automatically — the paper deed has two signature lines for it. Tell them
+    // there is something to sign.
+    try {
+      await NotificationService.getInstance().notify({
+        userIds: [],
+        type: "loan",
+        title: "Loan fully repaid — bond awaiting cancellation",
+        body: `A loan has been repaid in full. The Secretary and President need to sign the bond cancellation.`,
+        data: { event: "loan_bond_awaiting_cancellation", loan_id: loanId },
+        notifyAdmins: true,
+        pushAdmins: true,
+      });
+    } catch (err) {
+      console.error(`[Repayment] Could not notify officers for loan ${loanId}:`, err);
+    }
+  }
+
   await NotificationService.getInstance().notify({
     userIds: [memberId],
     type: "loan",
@@ -129,4 +161,39 @@ export async function processLoanRepayment(
     remaining_balance: newBalance,
     loan_status: newStatus,
   };
+}
+
+/**
+ * Credit a payment against the outstanding installments, oldest first.
+ *
+ * A payment may span more than one installment (or fall short of one), so this
+ * walks the schedule rather than assuming a 1:1 match between payments and
+ * rows.
+ */
+async function applyToSchedule(loanId: string, amountNaira: number): Promise<void> {
+  const { data: rows, error } = await supabase
+    .from("loan_installments")
+    .select("id, amount, paid_amount, status")
+    .eq("loan_id", loanId)
+    .neq("status", "paid")
+    .order("installment_no", { ascending: true });
+
+  if (error) throw new Error(error.message);
+
+  let remaining = amountNaira;
+  for (const row of rows ?? []) {
+    if (remaining <= 0) break;
+    const outstanding = Number(row.amount) - Number(row.paid_amount);
+    const applied = Math.min(remaining, outstanding);
+    const paid = Number(row.paid_amount) + applied;
+    remaining = Math.round((remaining - applied) * 100) / 100;
+
+    await supabase
+      .from("loan_installments")
+      .update({
+        paid_amount: Math.round(paid * 100) / 100,
+        status: paid >= Number(row.amount) ? "paid" : row.status,
+      })
+      .eq("id", row.id);
+  }
 }
