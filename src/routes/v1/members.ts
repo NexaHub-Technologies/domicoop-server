@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
 import { paginationQS, paginate, uuidParam } from "@/utils/validators";
 import { NotificationService } from "@/services/notificationService";
+import { signedSignatureUrl } from "@/services/memberRegistration";
 
 export const memberRoutes = new Elysia({ prefix: "/members" })
 
@@ -128,7 +129,17 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
         .eq("id", params.id)
         .single();
       if (error) throw new Error("Member not found");
-      return data;
+
+      // signature_url is stored as an object path in the private
+      // member-documents bucket. A bare path is useless to the admin client,
+      // and a permanent URL would defeat the point of a private bucket, so
+      // hand back a short-lived signed URL instead.
+      return {
+        ...data,
+        signature_url: data.signature_url
+          ? await signedSignatureUrl(data.signature_url)
+          : null,
+      };
     },
     { params: uuidParam },
   )
@@ -174,39 +185,97 @@ export const memberRoutes = new Elysia({ prefix: "/members" })
     return data;
   })
 
+  /**
+   * Approve a pending member
+   *
+   * Flips the member to `active` and tells them, with the member number they
+   * were issued.
+   *
+   * The number itself is NOT computed here. `generate_member_number()` (a
+   * BEFORE UPDATE trigger installed in the initial schema) derives it from
+   * MAX(existing) + 1 with a collision loop, and only when `member_no IS NULL`.
+   * This route previously pre-empted that with `COUNT(active) + 1`, which was
+   * wrong three ways: suspended members keep their number but leave the count,
+   * so numbers got reused; two concurrent approvals computed the same one; and
+   * writing the column explicitly bypassed the trigger's IS NULL guard, so
+   * re-approving an active member silently reassigned their identity. Letting
+   * the trigger own it fixes all three — read the number back from the
+   * returned row.
+   *
+   * @route POST /members/:id/approve
+   * @group Members
+   * @returns {Object} 200 - The updated member row, including `member_no`
+   * @returns {Error} 404 - Member not found
+   */
   .post(
     "/:id/approve",
-    async ({ params, userId }) => {
-      const { count } = await supabase
-        .from("profiles")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "active");
-      const memberNo = `DOMICOOP-${String((count ?? 0) + 1).padStart(4, "0")}`;
+    async ({ params, userId, set }) => {
+      // `.neq(status, active)` is the concurrency gate, not a precondition
+      // check: of two simultaneous approvals only one matches a row, so only
+      // one audit entry and one notification are written. The loser gets null.
       const { data, error } = await supabase
         .from("profiles")
-        .update({
-          status: "active",
-          member_no: memberNo,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ status: "active", updated_at: new Date().toISOString() })
         .eq("id", params.id)
+        .neq("status", "active")
         .select()
-        .single();
+        .maybeSingle();
+
       if (error) throw new Error(error.message);
+
+      if (!data) {
+        // Either the member is already active — admin clients retry this after
+        // a network blip — or there is no such member. Approving twice must be
+        // a no-op: a member number is an identity, and a second notification
+        // would tell someone they had just been approved all over again.
+        const { data: existing } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", params.id)
+          .maybeSingle();
+
+        if (!existing) {
+          set.status = 404;
+          throw new Error("Member not found");
+        }
+        return existing;
+      }
+
+      const memberNo = data.member_no;
+
       await writeAuditLog({
         actor_id: userId!,
         action: "approve_member",
         entity: "profiles",
         entity_id: params.id,
+        metadata: { member_no: memberNo },
       });
 
-      await NotificationService.getInstance().notify({
-        userIds: [params.id],
-        type: "security",
-        title: "Membership Approved",
-        body: `Welcome to DOMICOOP! Your membership has been approved. Your member number is ${memberNo}.`,
-        data: { event: "member_approved", member_no: memberNo },
-      });
+      // Best-effort: the approval is already committed. Throwing here would
+      // hand the admin a 500 for work that succeeded, and their retry would be
+      // a no-op that never re-sends this — so log loudly instead, and let it
+      // be re-sent by hand if it matters.
+      //
+      // type "security" is deliberate: it is the one category members cannot
+      // mute (server-enforced always-true, see NotificationPreferences), and
+      // being told you are now a member is not optional.
+      try {
+        await NotificationService.getInstance().notify({
+          userIds: [params.id],
+          type: "security",
+          title: "Membership Approved",
+          body: memberNo
+            ? `Welcome to DOMICOOP, ${data.full_name.split(" ")[0]}! Your membership has been approved. Your member number is ${memberNo}.`
+            : `Welcome to DOMICOOP, ${data.full_name.split(" ")[0]}! Your membership has been approved.`,
+          data: { event: "member_approved", member_id: params.id, member_no: memberNo },
+          action: { label: "View Profile", url: "/profile" },
+        });
+      } catch (err) {
+        console.error(
+          `[Members] Member ${params.id} approved as ${memberNo}, but the approval notification failed:`,
+          err,
+        );
+      }
 
       return data;
     },

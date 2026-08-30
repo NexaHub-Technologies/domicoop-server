@@ -61,6 +61,7 @@ interface PaystackChargeEventData {
   currency: string;
   channel: string;
   paid_at: string | null;
+  metadata?: Record<string, unknown> | null;
   customer?: { email?: string };
 }
 
@@ -72,6 +73,18 @@ interface PaystackChargeEventData {
 async function handleChargeSuccess(data: PaystackChargeEventData): Promise<void> {
   const reference = data.reference;
   if (!reference || data.status !== "success") return;
+
+  // Registration fees settle synchronously: POST /v1/registration/apply
+  // verifies the charge with Paystack before the account exists, and writes the
+  // ledger row itself. The webhook would otherwise fall through to the
+  // "matches no contribution" branch below and look like a lost payment, so
+  // skip it explicitly rather than incidentally.
+  if ((data.metadata as { purpose?: string } | null | undefined)?.purpose === "registration") {
+    console.log(
+      `[Paystack Webhook] charge.success ${reference} is a registration fee, settled at /registration/apply`,
+    );
+    return;
+  }
 
   // Already settled by the /verify endpoint (or an earlier webhook delivery)?
   const { data: existingTx } = await supabase

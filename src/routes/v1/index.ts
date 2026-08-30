@@ -1,5 +1,6 @@
 import Elysia from "elysia";
 import { authRoutes } from "./auth";
+import { registrationRoutes } from "./registration";
 import { memberRoutes } from "./members";
 import { adminRoutes } from "./admins";
 import { dashboardRoutes } from "./dashboard";
@@ -16,6 +17,7 @@ import { webhookRoutes } from "./webhooks";
 
 export const v1Routes = new Elysia({ prefix: "/v1" })
   .use(authRoutes)
+  .use(registrationRoutes)
   .use(memberRoutes)
   .use(adminRoutes)
   .use(dashboardRoutes)

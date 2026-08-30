@@ -25,6 +25,7 @@
     "@supabase/supabase-js": "^2.103.0",
     "elysia": "^1.4.28",
     "elysia-rate-limit": "^4.5.1",
-    "expo-server-sdk": "^6.1.0"
+    "expo-server-sdk": "^6.1.0",
+    "pdf-lib": "^1.17.1"
   }
 }

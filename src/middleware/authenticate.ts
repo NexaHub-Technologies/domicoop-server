@@ -27,10 +27,29 @@ const PUBLIC_PATHS = [
 // an exact + method match rather than a startsWith prefix.
 const PUBLIC_GET_PATHS = ["/v1/announcements", "/announcements"];
 
+// Public, but matched EXACTLY rather than by prefix.
+//
+// PUBLIC_PATHS uses startsWith, which is fine for a whole namespace but wrong
+// here: "/v1/registration/window" is a prefix of "/v1/registration/windows",
+// the admin intake management endpoints. A prefix entry would hand those to
+// anonymous callers. Anything sharing a stem with an admin route belongs in
+// this list, not that one.
+const PUBLIC_EXACT_PATHS = [
+  "/v1/registration/window",
+  "/v1/registration/apply",
+  "/v1/registration/precheck",
+  "/registration/window",
+  "/registration/apply",
+  "/registration/precheck",
+];
+
 export const authenticate = new Elysia({ name: "authenticate" }).derive(
   { as: "global" },
   async ({ headers, set, path, request }) => {
     if (PUBLIC_PATHS.some((p) => path.startsWith(p))) {
+      return;
+    }
+    if (PUBLIC_EXACT_PATHS.some((p) => path === p || path === `${p}/`)) {
       return;
     }
     // path can arrive with or without a trailing slash depending on how the
