@@ -45,6 +45,8 @@ export interface LoanWithProfile {
   status: string;
   /** Reference stored by a previous disbursement attempt, if any. */
   paystack_transfer_ref: string | null;
+  /** Paystack transfer_code, needed to finalize OTP-gated transfers. */
+  transfer_code: string | null;
   profiles: {
     id: string;
     full_name: string;
@@ -93,7 +95,10 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
     );
   }
 
-  if (typedLoan.status !== "approved") {
+  // Retries after a failed disbursement re-enter here once the cause is
+  // fixed. Safe: the stored-reference check below makes a retry reconcile
+  // instead of duplicating.
+  if (!["approved", "disbursement_failed"].includes(typedLoan.status)) {
     throw new Error(
       `Loan must be in approved status to disburse. Current status: ${typedLoan.status}`,
     );
@@ -176,6 +181,7 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
           status: "disbursed",
           paystack_transfer_ref: reference,
           recipient_code: recipient.recipient_code,
+          transfer_code: transfer.transfer_code,
           disbursed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         } as any)
@@ -208,6 +214,7 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
       .update({
         paystack_transfer_ref: reference,
         recipient_code: recipient.recipient_code,
+        transfer_code: transfer.transfer_code,
         updated_at: new Date().toISOString(),
       } as any)
       .eq("id", loanId);
@@ -238,8 +245,116 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
   }
 }
 
-/** Record a conclusively successful transfer: disbursed + stamped + notified. */
-async function completeDisbursement(
+/**
+ * Finalize an OTP-gated transfer with the code Paystack sent to the
+ * business phone. The loan must be `approved` with a stored pending
+ * transfer; a wrong OTP does not fail the loan — the transfer stays
+ * pending and the admin can retry within Paystack's ~30 minute window.
+ */
+export async function finalizeDisbursementOtp(
+  loanId: string,
+  otp: string,
+): Promise<DisbursementResponse> {
+  const { data: loan, error: loanError } = await supabase
+    .from("loans")
+    .select(
+      `
+      id,
+      member_id,
+      amount_approved,
+      interest_rate,
+      tenure_months,
+      monthly_repayment,
+      balance,
+      status,
+      paystack_transfer_ref,
+      transfer_code,
+      profiles (
+        id,
+        full_name,
+        bank_account,
+        bank_code,
+        bank_name
+      )
+    `,
+    )
+    .eq("id", loanId)
+    .single();
+
+  if (loanError || !loan) {
+    throw new Error("Loan not found");
+  }
+
+  const typedLoan = loan as unknown as LoanWithProfile;
+
+  if (typedLoan.status !== "approved") {
+    throw new Error(
+      `Only a loan awaiting disbursement can be finalized. Current status: ${typedLoan.status}`,
+    );
+  }
+  if (!typedLoan.paystack_transfer_ref) {
+    throw new Error("No pending transfer for this loan. Disburse first.");
+  }
+
+  // Older pending transfers predate the transfer_code column — recover the
+  // code via Verify (which returns it) and persist it for next time.
+  let transferCode = typedLoan.transfer_code;
+  if (!transferCode) {
+    const current = await paystack.verifyTransfer(typedLoan.paystack_transfer_ref);
+    if (current.status === "success") {
+      return await completeDisbursement(loanId, typedLoan);
+    }
+    if (FAILED_TRANSFER_STATUSES.has(current.status)) {
+      return await failDisbursement(
+        loanId,
+        typedLoan,
+        `Prior transfer ended as ${current.status}`,
+      );
+    }
+    transferCode = current.transfer_code;
+    await supabase
+      .from("loans")
+      .update({ transfer_code: transferCode } as any)
+      .eq("id", loanId);
+  }
+
+  let finalized;
+  try {
+    finalized = await paystack.finalizeTransfer({ transfer_code: transferCode, otp });
+  } catch (err) {
+    // A rejected OTP (or finalize outage) is not a failed transfer — check
+    // the transfer's actual state before deciding.
+    const msg = err instanceof Error ? err.message : "OTP not accepted";
+    const current = await paystack
+      .verifyTransfer(typedLoan.paystack_transfer_ref)
+      .catch(() => null);
+    if (current && current.status === "success") {
+      return await completeDisbursement(loanId, typedLoan);
+    }
+    if (current && FAILED_TRANSFER_STATUSES.has(current.status)) {
+      return await failDisbursement(loanId, typedLoan, `Transfer ${current.status} at Paystack`);
+    }
+    throw new Error(`${msg}. Transfer still pending — try the OTP again.`);
+  }
+
+  if (finalized.status === "success") {
+    return await completeDisbursement(loanId, typedLoan);
+  }
+  if (FAILED_TRANSFER_STATUSES.has(finalized.status)) {
+    return await failDisbursement(
+      loanId,
+      typedLoan,
+      `Transfer ${finalized.status} at Paystack`,
+    );
+  }
+  return {
+    result: DisbursementResult.PendingOTP,
+    paystack_transfer_ref: typedLoan.paystack_transfer_ref,
+    message: "Transfer still processing. Awaiting confirmation via webhook.",
+  };
+}
+
+/** Record a conclusively successful transfer: disbursed + stamped + notified. */async function completeDisbursement(
   loanId: string,
   loan: LoanWithProfile,
 ): Promise<DisbursementResponse> {

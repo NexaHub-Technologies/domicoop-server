@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
 import { paginationQS, paginate, uuidParam } from "@/utils/validators";
 import type { Database } from "@/types/database";
-import { disburseLoan, notifyLoanApproved } from "@/services/loanDisbursement";
+import { disburseLoan, finalizeDisbursementOtp, notifyLoanApproved } from "@/services/loanDisbursement";
 import { MIN_TENURE_MONTHS, MAX_TENURE_MONTHS, isTenureInRange } from "@/services/loanTerms";
 import { processLoanRepayment, RepaymentResult } from "@/services/loanRepayment";
 import { NotificationService } from "@/services/notificationService";
@@ -752,7 +752,9 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
         throw new Error("Loan not found");
       }
 
-      if (loan.status !== "approved") {
+      // Approved loans disburse; failed ones may be retried once the cause
+      // (e.g. bad bank details) is fixed. Anything else is past disbursement.
+      if (!["approved", "disbursement_failed"].includes(loan.status)) {
         set.status = 409;
         throw new Error(
           `Loan must be in 'approved' status to disburse. Current status: ${loan.status}`,
@@ -809,4 +811,83 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
       }
     },
     { params: uuidParam },
+  )
+
+  /**
+   * Finalize an OTP-gated disbursement with the code Paystack sent to the
+   * business phone. The loan must be `approved` with a stored pending
+   * transfer (i.e. a prior disburse returned `pending_otp`).
+   *
+   * @route POST /loans/:id/disburse/finalize
+   * @group Loans
+   */
+  .post(
+    "/:id/disburse/finalize",
+    async ({ params, body, userId, set }) => {
+      const { data: loan, error: loanError } = await supabase
+        .from("loans")
+        .select("id, status, paystack_transfer_ref")
+        .eq("id", params.id)
+        .single();
+
+      if (loanError || !loan) {
+        set.status = 404;
+        throw new Error("Loan not found");
+      }
+
+      if (loan.status !== "approved") {
+        set.status = 409;
+        throw new Error(
+          `Only a loan awaiting disbursement can be finalized. Current status: ${loan.status}`,
+        );
+      }
+
+      if (!loan.paystack_transfer_ref) {
+        set.status = 422;
+        throw new Error("No pending transfer for this loan. Disburse first.");
+      }
+
+      let result;
+      try {
+        result = await finalizeDisbursementOtp(params.id, body.otp);
+      } catch (err) {
+        set.status = 422;
+        throw err;
+      }
+
+      await writeAuditLog({
+        actor_id: userId!,
+        action: "loan_disbursement_otp_finalized",
+        entity: "loans",
+        entity_id: params.id,
+        metadata: { result: result.result },
+      });
+
+      if (result.result === "success") {
+        return {
+          success: true,
+          status: "disbursed",
+          paystack_transfer_ref: result.paystack_transfer_ref,
+          disbursed_at: result.disbursed_at,
+          message: result.message || "Loan disbursed successfully",
+        };
+      } else if (result.result === "pending_otp") {
+        return {
+          success: true,
+          status: "pending_otp",
+          paystack_transfer_ref: result.paystack_transfer_ref,
+          message: result.message || "Transfer still pending.",
+        };
+      } else {
+        return {
+          success: false,
+          status: "disbursement_failed",
+          message: result.message || "Disbursement failed",
+        };
+      }
+    },
+    {
+      params: uuidParam,
+      body: t.Object({ otp: t.String({ minLength: 1 }) }),
+    },
   );

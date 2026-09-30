@@ -428,6 +428,7 @@ export type Database = {
           recipient_code: string | null
           status: string
           tenure_months: number | null
+          transfer_code: string | null
           type: string
           updated_at: string
         }
@@ -461,6 +462,7 @@ export type Database = {
           recipient_code?: string | null
           status?: string
           tenure_months?: number | null
+          transfer_code?: string | null
           type: string
           updated_at?: string
         }
@@ -494,6 +496,7 @@ export type Database = {
           recipient_code?: string | null
           status?: string
           tenure_months?: number | null
+          transfer_code?: string | null
           type?: string
           updated_at?: string
         }
