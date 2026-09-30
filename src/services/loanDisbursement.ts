@@ -16,6 +16,24 @@ export interface DisbursementResponse {
   message?: string;
 }
 
+/**
+ * Transfer is still moving — wait for the webhook, do not retry with a new
+ * reference (Paystack docs: retrying with a new reference double-credits).
+ */
+const PENDING_TRANSFER_STATUSES = new Set(["pending", "otp", "received"]);
+
+/**
+ * Transfer is over and will never complete — safe to record the failure and,
+ * on a later retry, start a fresh transfer. Per Paystack's transfer lifecycle.
+ */
+const FAILED_TRANSFER_STATUSES = new Set([
+  "failed",
+  "reversed",
+  "abandoned",
+  "blocked",
+  "rejected",
+]);
+
 export interface LoanWithProfile {
   id: string;
   member_id: string;
@@ -25,6 +43,8 @@ export interface LoanWithProfile {
   monthly_repayment: number;
   balance: number;
   status: string;
+  /** Reference stored by a previous disbursement attempt, if any. */
+  paystack_transfer_ref: string | null;
   profiles: {
     id: string;
     full_name: string;
@@ -47,6 +67,7 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
       monthly_repayment,
       balance,
       status,
+      paystack_transfer_ref,
       profiles (
         id,
         full_name,
@@ -78,6 +99,44 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
     );
   }
 
+  // Idempotency: a previous attempt may already have a transfer for this
+  // loan (stored reference). Per the Paystack docs, a non-conclusive
+  // transfer must be retried with the SAME reference — minting a new one
+  // while the old transfer is still processing would credit the member
+  // twice. So reconcile the stored reference before starting anything new.
+  if (typedLoan.paystack_transfer_ref) {
+    try {
+      const prior = await paystack.verifyTransfer(typedLoan.paystack_transfer_ref);
+      if (prior.status === "success") {
+        return await completeDisbursement(loanId, typedLoan);
+      }
+      if (FAILED_TRANSFER_STATUSES.has(prior.status)) {
+        return await failDisbursement(
+          loanId,
+          typedLoan,
+          `Prior transfer ended as ${prior.status}`,
+        );
+      }
+      return {
+        result: DisbursementResult.PendingOTP,
+        paystack_transfer_ref: typedLoan.paystack_transfer_ref,
+        message: "Transfer already in progress. Awaiting confirmation via webhook.",
+      };
+    } catch (err) {
+      // Fall through to a fresh transfer ONLY if the stored reference is
+      // confirmed unknown to Paystack. Any other verify failure (network,
+      // timeout) leaves the prior transfer's state unknown — minting a new
+      // transfer then could credit the member twice — so surface the error
+      // and keep the loan approved instead.
+      const msg = err instanceof Error ? err.message : "";
+      if (!/not found/i.test(msg)) {
+        throw new Error(
+          `Could not confirm the status of the pending transfer (${typedLoan.paystack_transfer_ref}). No new transfer was started: ${msg || "verify unavailable"}`,
+        );
+      }
+    }
+  }
+
   try {
     const verification = await paystack.resolveAccount(member.bank_account, member.bank_code);
 
@@ -99,7 +158,9 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
     });
 
     const timestamp = Date.now();
-    const reference = `LOAN-${loanId.slice(0, 8)}-${timestamp}`;
+    // Lowercase a-z, 0-9, dash/underscore only, 16–50 chars, per the
+    // Transfer API reference.
+    const reference = `loan-${loanId.slice(0, 8)}-${timestamp}`;
 
     const transfer = await paystack.initiateTransfer({
       amount: typedLoan.amount_approved,
@@ -108,49 +169,54 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
       reason: `Loan disbursement for ${member.full_name}`,
     });
 
-    if (transfer.status === "failed") {
+    if (transfer.status === "success") {
       await supabase
         .from("loans")
         .update({
-          status: "disbursement_failed",
+          status: "disbursed",
+          paystack_transfer_ref: reference,
+          recipient_code: recipient.recipient_code,
+          disbursed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        })
+        } as any)
         .eq("id", loanId);
 
-      await sendDisbursementFailedNotification(typedLoan as unknown as LoanWithProfile);
+      await sendDisbursementSuccessNotification(typedLoan);
 
       return {
-        result: DisbursementResult.Failed,
-        message: "Transfer failed at Paystack",
+        result: DisbursementResult.Success,
+        paystack_transfer_ref: reference,
+        recipient_code: recipient.recipient_code,
+        disbursed_at: new Date().toISOString(),
+        message: "Loan disbursed successfully",
       };
     }
 
-    const isSuccess = transfer.status === "success";
-    const now = new Date().toISOString();
+    if (FAILED_TRANSFER_STATUSES.has(transfer.status)) {
+      return await failDisbursement(
+        loanId,
+        typedLoan,
+        `Transfer ${transfer.status} at Paystack`,
+      );
+    }
 
+    // pending / otp / received: the transfer is still moving. Record the
+    // reference so retries reconcile instead of duplicating, and leave the
+    // loan approved until the webhook confirms.
     await supabase
       .from("loans")
       .update({
-        status: isSuccess ? "disbursed" : "approved",
         paystack_transfer_ref: reference,
         recipient_code: recipient.recipient_code,
-        disbursed_at: isSuccess ? now : null,
-        updated_at: now,
+        updated_at: new Date().toISOString(),
       } as any)
       .eq("id", loanId);
 
-    if (isSuccess) {
-      await sendDisbursementSuccessNotification(typedLoan);
-    }
-
     return {
-      result: isSuccess ? DisbursementResult.Success : DisbursementResult.PendingOTP,
+      result: DisbursementResult.PendingOTP,
       paystack_transfer_ref: reference,
       recipient_code: recipient.recipient_code,
-      disbursed_at: isSuccess ? now : undefined,
-      message: isSuccess
-        ? "Loan disbursed successfully"
-        : "Transfer initiated. Awaiting OTP confirmation via webhook.",
+      message: "Transfer initiated. Awaiting OTP confirmation via webhook.",
     };
   } catch (error) {
     console.error("Disbursement error:", error);
@@ -170,6 +236,54 @@ export async function disburseLoan(loanId: string): Promise<DisbursementResponse
       message: error instanceof Error ? error.message : "Unknown error during disbursement",
     };
   }
+}
+
+/** Record a conclusively successful transfer: disbursed + stamped + notified. */
+async function completeDisbursement(
+  loanId: string,
+  loan: LoanWithProfile,
+): Promise<DisbursementResponse> {
+  const now = new Date().toISOString();
+
+  await supabase
+    .from("loans")
+    .update({
+      status: "disbursed",
+      disbursed_at: now,
+      updated_at: now,
+    })
+    .eq("id", loanId);
+
+  await sendDisbursementSuccessNotification(loan);
+
+  return {
+    result: DisbursementResult.Success,
+    paystack_transfer_ref: loan.paystack_transfer_ref ?? undefined,
+    disbursed_at: now,
+    message: "Loan disbursed successfully",
+  };
+}
+
+/** Record a conclusively failed transfer and notify both sides. */
+async function failDisbursement(
+  loanId: string,
+  loan: LoanWithProfile,
+  message: string,
+): Promise<DisbursementResponse> {
+  await supabase
+    .from("loans")
+    .update({
+      status: "disbursement_failed",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", loanId);
+
+  await sendDisbursementFailedNotification(loan);
+
+  return {
+    result: DisbursementResult.Failed,
+    message,
+  };
 }
 
 async function sendApprovalNotification(loan: LoanWithProfile): Promise<void> {

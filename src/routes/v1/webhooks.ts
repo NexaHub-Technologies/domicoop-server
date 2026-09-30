@@ -194,7 +194,7 @@ async function handleChargeSuccess(data: PaystackChargeEventData): Promise<void>
 async function handleTransferSuccess(data: PaystackTransferEvent["data"]): Promise<void> {
   const reference = data.reference;
 
-  if (!reference || !reference.startsWith("LOAN-")) {
+  if (!reference || !reference.toLowerCase().startsWith("loan-")) {
     console.log("[Paystack Webhook] Ignoring non-loan transfer:", reference);
     return;
   }
@@ -268,7 +268,7 @@ async function handleTransferSuccess(data: PaystackTransferEvent["data"]): Promi
 async function handleTransferFailed(data: PaystackTransferEvent["data"]): Promise<void> {
   const reference = data.reference;
 
-  if (!reference || !reference.startsWith("LOAN-")) {
+  if (!reference || !reference.toLowerCase().startsWith("loan-")) {
     console.log("[Paystack Webhook] Ignoring non-loan transfer:", reference);
     return;
   }
@@ -328,7 +328,7 @@ async function handleTransferFailed(data: PaystackTransferEvent["data"]): Promis
 async function handleTransferReversed(data: PaystackTransferEvent["data"]): Promise<void> {
   const reference = data.reference;
 
-  if (!reference || !reference.startsWith("LOAN-")) {
+  if (!reference || !reference.toLowerCase().startsWith("loan-")) {
     console.log("[Paystack Webhook] Ignoring non-loan transfer:", reference);
     return;
   }

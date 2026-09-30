@@ -423,7 +423,7 @@ async function paystackRequest<T>(path: string, options: RequestInit = {}): Prom
  * const transfer = await paystack.initiateTransfer({
  *   amount: 50000, // ₦500 in kobo
  *   recipient: recipient.recipient_code,
- *   reference: 'LOAN-abc123',
+ *   reference: 'loan-abc123',
  *   reason: 'Loan disbursement'
  * });
  * ```
@@ -471,6 +471,14 @@ export const paystack = {
 
   /**
    * Verify a transaction by reference
+   *
+   * Checks the status of a previously initialized transaction.
+   *
+   * @param reference - The transaction reference to verify
+   * @returns Full transaction details including status, customer info, and payment data
+   *
+   * @example
+   * ```typnce
    *
    * Checks the status of a previously initialized transaction.
    *
@@ -604,7 +612,7 @@ export const paystack = {
    * const transfer = await paystack.initiateTransfer({
    *   amount: 50000, // ₦50,000
    *   recipient: 'RCP_xxxxx',
-   *   reference: 'LOAN-abc123-1700000000000',
+   *   reference: 'loan-abc123-1700000000000',
    *   reason: 'Loan disbursement for John Doe'
    * });
    *
@@ -646,7 +654,7 @@ export const paystack = {
    *
    * @example
    * ```typescript
-   * const transfer = await paystack.verifyTransfer('LOAN-abc123-1700000000000');
+   * const transfer = await paystack.verifyTransfer('loan-abc123-1700000000000');
    * console.log(transfer.status); // 'success', 'pending', or 'failed'
    * ```
    */
