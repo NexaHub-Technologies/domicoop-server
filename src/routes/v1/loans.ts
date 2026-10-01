@@ -6,7 +6,12 @@ import { supabase } from "@/lib/supabase";
 import { writeAuditLog } from "@/utils/audit";
 import { paginationQS, paginate, uuidParam } from "@/utils/validators";
 import type { Database } from "@/types/database";
-import { disburseLoan, finalizeDisbursementOtp, notifyLoanApproved } from "@/services/loanDisbursement";
+import {
+  disburseLoan,
+  finalizeDisbursementOtp,
+  resendDisbursementOtp,
+  notifyLoanApproved,
+} from "@/services/loanDisbursement";
 import { MIN_TENURE_MONTHS, MAX_TENURE_MONTHS, isTenureInRange } from "@/services/loanTerms";
 import { processLoanRepayment, RepaymentResult } from "@/services/loanRepayment";
 import { NotificationService } from "@/services/notificationService";
@@ -890,4 +895,62 @@ export const loanRoutes = new Elysia({ prefix: "/loans" })
       params: uuidParam,
       body: t.Object({ otp: t.String({ minLength: 1 }) }),
     },
+  )
+
+  /**
+   * Resend the OTP for a pending disbursement transfer. Issues a fresh code
+   * to the business phone — previously sent codes stop working.
+   *
+   * @route POST /loans/:id/disburse/otp/resend
+   * @group Loans
+   */
+  .post(
+    "/:id/disburse/otp/resend",
+    async ({ params, userId, set }) => {
+      const { data: loan, error: loanError } = await supabase
+        .from("loans")
+        .select("id, status, paystack_transfer_ref")
+        .eq("id", params.id)
+        .single();
+
+      if (loanError || !loan) {
+        set.status = 404;
+        throw new Error("Loan not found");
+      }
+
+      if (loan.status !== "approved") {
+        set.status = 409;
+        throw new Error(
+          `Only a loan awaiting disbursement has a pending OTP. Current status: ${loan.status}`,
+        );
+      }
+
+      if (!loan.paystack_transfer_ref) {
+        set.status = 422;
+        throw new Error("No pending transfer for this loan. Disburse first.");
+      }
+
+      let result;
+      try {
+        result = await resendDisbursementOtp(params.id);
+      } catch (err) {
+        set.status = 422;
+        throw err;
+      }
+
+      await writeAuditLog({
+        actor_id: userId!,
+        action: "loan_disbursement_otp_resent",
+        entity: "loans",
+        entity_id: params.id,
+      });
+
+      return {
+        success: true,
+        status: "pending_otp",
+        paystack_transfer_ref: result.paystack_transfer_ref,
+        message: result.message || "A fresh OTP has been sent.",
+      };
+    },
+    { params: uuidParam },
   );

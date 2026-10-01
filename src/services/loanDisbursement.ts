@@ -361,6 +361,83 @@ export async function finalizeDisbursementOtp(
   };
 }
 
+/**
+ * Resend the OTP for a pending disbursement transfer. Generates a fresh
+ * code to the business phone — any previously sent code stops working, so
+ * the admin must enter the newest one.
+ */
+export async function resendDisbursementOtp(loanId: string): Promise<DisbursementResponse> {
+  const { data: loan, error: loanError } = await supabase
+    .from("loans")
+    .select(
+      `
+      id,
+      member_id,
+      amount_approved,
+      interest_rate,
+      tenure_months,
+      monthly_repayment,
+      balance,
+      status,
+      paystack_transfer_ref,
+      transfer_code,
+      profiles (
+        id,
+        full_name,
+        bank_account,
+        bank_code,
+        bank_name
+      )
+    `,
+    )
+    .eq("id", loanId)
+    .single();
+
+  if (loanError || !loan) {
+    throw new Error("Loan not found");
+  }
+
+  const typedLoan = loan as unknown as LoanWithProfile;
+
+  if (typedLoan.status !== "approved") {
+    throw new Error(
+      `Only a loan awaiting disbursement has a pending OTP. Current status: ${typedLoan.status}`,
+    );
+  }
+  if (!typedLoan.paystack_transfer_ref) {
+    throw new Error("No pending transfer for this loan. Disburse first.");
+  }
+
+  // Only a still-moving transfer can take a fresh OTP.
+  const current = await paystack.verifyTransfer(typedLoan.paystack_transfer_ref);
+  if (current.status === "success") {
+    return await completeDisbursement(loanId, typedLoan);
+  }
+  if (FAILED_TRANSFER_STATUSES.has(current.status)) {
+    return await failDisbursement(
+      loanId,
+      typedLoan,
+      `Transfer ${current.status} at Paystack — a fresh OTP cannot be issued for it.`,
+    );
+  }
+
+  const transferCode = typedLoan.transfer_code ?? current.transfer_code;
+  if (!typedLoan.transfer_code && transferCode) {
+    await supabase
+      .from("loans")
+      .update({ transfer_code: transferCode } as any)
+      .eq("id", loanId);
+  }
+
+  await paystack.resendTransferOtp(transferCode);
+
+  return {
+    result: DisbursementResult.PendingOTP,
+    paystack_transfer_ref: typedLoan.paystack_transfer_ref,
+    message: "A fresh OTP has been sent to the business phone. Enter the newest code.",
+  };
+}
+
 /** Record a conclusively successful transfer: disbursed + stamped + notified. */async function completeDisbursement(
   loanId: string,
   loan: LoanWithProfile,
