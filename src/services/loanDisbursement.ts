@@ -328,13 +328,20 @@ export async function finalizeDisbursementOtp(
     const current = await paystack
       .verifyTransfer(typedLoan.paystack_transfer_ref)
       .catch(() => null);
+    console.error(
+      `[Disbursement] Finalize rejected for loan ${loanId} (ref ${typedLoan.paystack_transfer_ref}, code ${transferCode}): ${msg}. Live status: ${current?.status ?? "unknown"}`,
+    );
     if (current && current.status === "success") {
       return await completeDisbursement(loanId, typedLoan);
     }
     if (current && FAILED_TRANSFER_STATUSES.has(current.status)) {
       return await failDisbursement(loanId, typedLoan, `Transfer ${current.status} at Paystack`);
     }
-    throw new Error(`${msg}. Transfer still pending — try the OTP again.`);
+    // Name the live status: `received` means URL-approval is switched on for
+    // the integration, in which case no OTP will ever finalize this transfer.
+    throw new Error(
+      `${msg}. Transfer is '${current?.status ?? "unknown"}' — try the OTP again.`,
+    );
   }
 
   if (finalized.status === "success") {
