@@ -693,13 +693,14 @@ export const paystack = {
    *
    * Generates a new OTP and sends it to the business phone. Note: this
    * invalidates any previously sent code — only the newest OTP will verify.
+   * `reason` must be "transfer" (the live API rejects anything else).
    *
    * @param transfer_code - The transfer code from initiateTransfer
    */
   resendTransferOtp: (transfer_code: string): Promise<void> =>
     paystackRequest<void>("/transfer/resend_otp", {
       method: "POST",
-      body: JSON.stringify({ transfer_code, reason: "resend_otp" }),
+      body: JSON.stringify({ transfer_code, reason: "transfer" }),
     }),
 
   /**
